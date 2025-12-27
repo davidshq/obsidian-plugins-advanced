@@ -1,0 +1,4 @@
+- Add ability to search by categories, tags.
+- Add ability to favorite plugins.
+- Add ability to rate/review plugins.
+- Add ability to recommend alternative plugins.

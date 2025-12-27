@@ -6,6 +6,8 @@ An Obsidian plugin that replicates the built-in community plugin browser functio
 
 - **Browse Plugins**: View all available community plugins in a beautiful grid or list layout
 - **Search & Filter**: Quickly find plugins by name, author, or description
+  - Filter by update date: Show only plugins updated after a specific date
+  - Show installed plugins only
 - **Plugin Details**: View comprehensive information about each plugin including:
   - Full description from README.md
   - Version and compatibility information
@@ -19,10 +21,12 @@ An Obsidian plugin that replicates the built-in community plugin browser functio
 ### For Development (Recommended)
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for easier development workflows using:
+
 - **Symlinks** - Automatic file updates (like browser extensions)
 - **Hot-Reload Plugin** - Automatic plugin reloading
 
 Quick start:
+
 ```bash
 # Set your vault path
 export OBSIDIAN_VAULT="/path/to/your/vault"
@@ -47,17 +51,20 @@ npm run dev
 ### From Source
 
 1. Clone this repository:
+
    ```bash
    git clone https://github.com/yourusername/obsidian-community-plugin-browser.git
    cd obsidian-community-plugin-browser
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
 3. Build the plugin:
+
    ```bash
    npm run build
    ```
@@ -81,12 +88,15 @@ npm run dev
 
 1. The plugin browser opens showing all available community plugins
 2. Use the search bar to filter plugins by name, author, or description
-3. Toggle between grid and list view using the mode buttons
-4. Click on any plugin card to view detailed information
+3. Use the "Updated after" date filter to show only plugins that have been updated since a specific date
+4. Toggle "Show installed only" to filter to plugins you've already installed
+5. Toggle between grid and list view using the mode buttons
+6. Click on any plugin card to view detailed information
 
 ### Viewing Plugin Details
 
 When you click on a plugin, you'll see:
+
 - Plugin name and version
 - Author information with link to their profile
 - Repository link
@@ -161,6 +171,7 @@ The plugin fetches plugin data from the [obsidian-releases repository](https://g
 - `README.md` from the plugin's GitHub repository for the full description
 
 When installing a plugin, it downloads the required files from the plugin's GitHub releases:
+
 - `main.js` (required)
 - `manifest.json` (required)
 - `styles.css` (optional)
@@ -218,7 +229,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 If you encounter any issues or have questions, please:
+
 1. Check the [Issues](https://github.com/yourusername/obsidian-community-plugin-browser/issues) page
 2. Create a new issue with details about your problem
 3. Include Obsidian version and plugin version in your report
-

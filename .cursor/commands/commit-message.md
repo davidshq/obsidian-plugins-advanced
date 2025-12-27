@@ -1,0 +1,1 @@
+Provide me with a brief git commit message for the currently staged changes, don't create a file just output in chat

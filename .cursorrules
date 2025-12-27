@@ -1,0 +1,8 @@
+- Use the local system date whenever providing hard-coded dates, you always get the dates wrong when using yourself as reference.
+- Make sure that dependencies are current.
+- Make sure you are following best practices.
+- As you learn best practices, tricks, etc. for developing an Obsidian plugin make sure you add it to the DEVELOPMENT.md doc
+- Make sure you refer to the DEVELOPMENT.md doc as you code.
+- Check code for deprecated language syntax and update accordingly.
+- Lint (eslint, tricks), format (prettier).
+- Add tests as needed, focus on critical paths. ALso update tests as appropriate.

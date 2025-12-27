@@ -6,184 +6,429 @@ import { Plugin, WorkspaceLeaf } from "obsidian";
 import { PluginService } from "./services/PluginService";
 import { InstallationService } from "./services/InstallationService";
 import { PluginListView, VIEW_TYPE_PLUGIN_LIST } from "./views/PluginListView";
-import { PluginDetailView, VIEW_TYPE_PLUGIN_DETAIL } from "./views/PluginDetailView";
-import { CommunityPlugin, PluginSettings, ViewLocation } from "./types";
+import {
+  PluginDetailView,
+  VIEW_TYPE_PLUGIN_DETAIL,
+} from "./views/PluginDetailView";
+import {
+  CommunityPlugin,
+  PluginSettings,
+  ViewLocation,
+  PluginInfo,
+} from "./types";
 import { PluginSettingTab } from "./settings/PluginSettingTab";
+import { PLUGIN_CONFIG } from "./config";
+import { isCustomEvent, hasOpenPopoutLeaf } from "./utils";
 
 const DEFAULT_SETTINGS: PluginSettings = {
-	viewLocation: "right",
+  viewLocation: "right",
+  displayMode: "grid",
+  searchFilters: {
+    query: "",
+    showInstalledOnly: false,
+  },
+  paginationThreshold: 200, // Default: load more when within 200px of bottom
 };
 
 export default class CommunityPluginBrowserPlugin extends Plugin {
-	settings: PluginSettings;
-	private pluginService: PluginService;
-	private installationService: InstallationService;
+  settings!: PluginSettings;
+  pluginService!: PluginService; // Made public for settings access
+  private installationService!: InstallationService;
+  private readonly BACKGROUND_REFRESH_INTERVAL =
+    PLUGIN_CONFIG.constants.backgroundRefreshInterval;
+  private eventHandlers: Map<WorkspaceLeaf, Record<string, EventListener>> =
+    new Map();
 
-	async onload() {
-		// Load settings
-		await this.loadSettings();
+  /**
+   * Initialize the plugin when Obsidian loads it
+   * Sets up services, registers views, adds settings tab, and registers commands
+   */
+  async onload() {
+    // Note: Obsidian automatically loads styles.css from the plugin directory
+    // Ensure styles.css is copied to .obsidian/plugins/community-plugin-browser/styles.css
 
-		// Initialize services
-		this.pluginService = new PluginService();
-		this.installationService = new InstallationService(this.app);
+    // Load settings
+    await this.loadSettings();
 
-		// Register views
-		this.registerView(VIEW_TYPE_PLUGIN_LIST, (leaf) => {
-			return new PluginListView(leaf, this.pluginService, this.installationService);
-		});
+    // Initialize services
+    this.pluginService = new PluginService();
+    this.installationService = new InstallationService(this.app);
 
-		this.registerView(VIEW_TYPE_PLUGIN_DETAIL, (leaf) => {
-			return new PluginDetailView(leaf, this.pluginService, this.installationService);
-		});
+    // Preload plugin data and stats in the background for faster initial view load
+    // This ensures cached data is available immediately when the view opens
+    (async () => {
+      try {
+        await Promise.all([
+          this.pluginService.fetchCommunityPlugins(),
+          this.pluginService.fetchPluginStats(),
+        ]);
+      } catch (error) {
+        console.warn("Failed to preload plugins or stats:", error);
+      }
+    })();
 
-		// Add settings tab
-		this.addSettingTab(new PluginSettingTab(this));
+    // Start background refresh mechanism to proactively update cache
+    this.startBackgroundRefresh();
 
-		// Register command to open plugin browser
-		this.addCommand({
-			id: "open-plugin-browser",
-			name: "Open Community Plugin Browser",
-			callback: () => {
-				this.openPluginListView();
-			},
-		});
+    // Register views
+    this.registerView(VIEW_TYPE_PLUGIN_LIST, (leaf) => {
+      return new PluginListView(
+        leaf,
+        this.pluginService,
+        this.installationService,
+        this,
+      );
+    });
 
-		// Add ribbon icon (optional)
-		this.addRibbonIcon("package", "Community Plugin Browser", () => {
-			this.openPluginListView();
-		});
-	}
+    this.registerView(VIEW_TYPE_PLUGIN_DETAIL, (leaf) => {
+      return new PluginDetailView(
+        leaf,
+        this.pluginService,
+        this.installationService,
+      );
+    });
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
+    // Add settings tab
+    this.addSettingTab(new PluginSettingTab(this));
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+    // Register command to open plugin browser
+    this.addCommand({
+      id: "open-plugin-browser",
+      name: "Open Community Plugin Browser",
+      callback: () => {
+        this.openPluginListView();
+      },
+    });
 
-	async onunload() {
-		// Cleanup if needed
-	}
+    // Add ribbon icon (optional)
+    this.addRibbonIcon("package", "Community Plugin Browser", () => {
+      this.openPluginListView();
+    });
+  }
 
-	/**
-	 * Open the plugin list view based on settings
-	 */
-	private async openPluginListView(): Promise<void> {
-		const { workspace } = this.app;
-		const location = this.settings.viewLocation;
+  /**
+   * Load plugin settings from Obsidian's data storage
+   * Merges loaded data with default settings
+   */
+  async loadSettings() {
+    const loadedData = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {});
+  }
 
-		// Check if view is already open
-		let leaf: WorkspaceLeaf | null = null;
-		const leaves = workspace.getLeavesOfType(VIEW_TYPE_PLUGIN_LIST);
-		if (leaves.length > 0) {
-			leaf = leaves[0];
-		} else {
-			// Create new leaf based on location preference
-			leaf = await this.createLeafInLocation(location);
-			if (leaf) {
-				await leaf.setViewState({
-					type: VIEW_TYPE_PLUGIN_LIST,
-					active: true,
-				});
-			}
-		}
+  /**
+   * Save plugin settings to Obsidian's data storage
+   */
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
 
-		// Set the leaf as active
-		if (leaf) {
-			workspace.setActiveLeaf(leaf, { focus: true });
-		}
+  /**
+   * Cleanup when the plugin is unloaded
+   *
+   * Removes all custom event listeners registered through `registerCustomEventListener()`.
+   * This ensures proper cleanup of cross-view communication handlers.
+   *
+   * **Automatic Cleanup:**
+   * - Background refresh interval is automatically cleaned up via `registerInterval()`
+   * - DOM event listeners in views are cleaned up via `registerDomEvent()` or manual tracking
+   *
+   * **Manual Cleanup:**
+   * - Custom event listeners are manually removed here since they're not standard DOM events
+   */
+  async onunload() {
+    // Clean up event listeners from all open views
+    const { workspace } = this.app;
+    const listLeaves = workspace.getLeavesOfType(VIEW_TYPE_PLUGIN_LIST);
+    const detailLeaves = workspace.getLeavesOfType(VIEW_TYPE_PLUGIN_DETAIL);
 
-		// Wait for view to be ready, then set up event listener
-		if (leaf) {
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			
-			// Listen for plugin selection events
-			if (leaf.view instanceof PluginListView) {
-				leaf.view.containerEl.addEventListener("plugin-selected", async (event: CustomEvent) => {
-					const plugin: CommunityPlugin = event.detail;
-					await this.openPluginDetailView(plugin);
-				});
-			}
-		}
-	}
+    // Clean up list view handlers
+    for (const leaf of listLeaves) {
+      if (leaf.view instanceof PluginListView) {
+        const handlers = this.eventHandlers.get(leaf);
+        const handler = handlers?.["plugin-selected"];
+        if (handler) {
+          try {
+            leaf.view.containerEl.removeEventListener(
+              "plugin-selected",
+              handler,
+            );
+          } catch (error) {
+            console.warn("Failed to remove plugin-selected listener:", error);
+          }
+        }
+      }
+    }
 
-	/**
-	 * Create a leaf in the specified location
-	 */
-	private async createLeafInLocation(location: ViewLocation): Promise<WorkspaceLeaf | null> {
-		const { workspace } = this.app;
+    // Clean up detail view handlers
+    for (const leaf of detailLeaves) {
+      if (leaf.view instanceof PluginDetailView) {
+        const handlers = this.eventHandlers.get(leaf);
+        const handler = handlers?.["navigate-back"];
+        if (handler) {
+          try {
+            leaf.view.containerEl.removeEventListener("navigate-back", handler);
+          } catch (error) {
+            console.warn("Failed to remove navigate-back listener:", error);
+          }
+        }
+      }
+    }
 
-		switch (location) {
-			case "main": {
-				// Open in main editor area
-				return workspace.getLeaf(true);
-			}
+    // Clear handlers map
+    this.eventHandlers.clear();
+  }
 
-			case "window": {
-				// Open in new window
-				// Note: openPopoutLeaf may not be available in all Obsidian versions
-				const workspaceAny = workspace as unknown as { openPopoutLeaf?: () => WorkspaceLeaf };
-				if (workspaceAny.openPopoutLeaf) {
-					return workspaceAny.openPopoutLeaf();
-				}
-				// Fallback to main area if popout not available
-				return workspace.getLeaf(true);
-			}
+  /**
+   * Start background refresh mechanism
+   * Checks for plugin updates every 30 minutes using conditional requests.
+   * Only downloads data if it has actually changed (via ETags).
+   * Uses registerInterval() for automatic cleanup on plugin unload.
+   */
+  private startBackgroundRefresh(): void {
+    // Ensure services are initialized before starting refresh
+    if (!this.pluginService) {
+      console.warn(
+        "Cannot start background refresh: pluginService not initialized",
+      );
+      return;
+    }
 
-			case "right":
-			default: {
-				// Open in right sidebar (default behavior)
-				const rightLeaf = workspace.getRightLeaf(false);
-				if (rightLeaf) {
-					return rightLeaf;
-				}
-				const mostRecent = workspace.getMostRecentLeaf();
-				if (mostRecent) {
-					return workspace.createLeafBySplit(mostRecent);
-				}
-				return workspace.getLeaf(true);
-			}
-		}
-	}
+    // Set up interval to refresh plugins and stats periodically
+    // Uses conditional requests (ETags) so only downloads if data changed
+    // registerInterval() automatically cleans up on plugin unload
+    this.registerInterval(
+      window.setInterval(async () => {
+        try {
+          if (this.pluginService) {
+            // Refresh both plugins and stats in parallel
+            await Promise.all([
+              this.pluginService.refreshPluginsIfChanged(),
+              this.pluginService.fetchPluginStats(false), // Uses conditional request
+            ]);
+          }
+        } catch (error) {
+          console.warn("Background refresh failed:", error);
+        }
+      }, this.BACKGROUND_REFRESH_INTERVAL),
+    );
+  }
 
-	/**
-	 * Open the plugin detail view
-	 */
-	private async openPluginDetailView(plugin: CommunityPlugin): Promise<void> {
-		const { workspace } = this.app;
-		const location = this.settings.viewLocation;
+  /**
+   * Register a custom event listener for a workspace leaf
+   *
+   * This method manages custom event listeners that communicate between views.
+   * Custom events (like "plugin-selected" and "navigate-back") are used to coordinate
+   * navigation between PluginListView and PluginDetailView.
+   *
+   * **Cleanup Strategy:**
+   * - All listeners registered through this method are automatically cleaned up in `onunload()`
+   * - Handlers are stored in `eventHandlers` Map keyed by WorkspaceLeaf
+   * - This ensures no memory leaks when the plugin is unloaded or views are closed
+   *
+   * **Why not use registerDomEvent?**
+   * - `registerDomEvent` is designed for standard DOM events (click, input, etc.)
+   * - Custom events require manual tracking since they're not part of the standard DOM event system
+   * - This pattern allows us to cleanly manage cross-view communication
+   *
+   * @param element The element to attach the listener to (typically view.containerEl)
+   * @param eventType The custom event type to listen for (e.g., "plugin-selected", "navigate-back")
+   * @param handler The event handler function to execute when the event fires
+   * @param leaf The workspace leaf associated with this listener (used for cleanup tracking)
+   */
+  private registerCustomEventListener(
+    element: HTMLElement,
+    eventType: string,
+    handler: EventListener,
+    leaf: WorkspaceLeaf,
+  ): void {
+    // Get or create handlers map entry for this leaf
+    let handlers = this.eventHandlers.get(leaf);
+    if (!handlers) {
+      handlers = {};
+      this.eventHandlers.set(leaf, handlers);
+    }
 
-		// Create or get detail view leaf
-		let leaf: WorkspaceLeaf | null = null;
-		const leaves = workspace.getLeavesOfType(VIEW_TYPE_PLUGIN_DETAIL);
-		if (leaves.length > 0) {
-			leaf = leaves[0];
-		} else {
-			// Create new leaf based on location preference
-			leaf = await this.createLeafInLocation(location);
-			if (leaf) {
-				await leaf.setViewState({
-					type: VIEW_TYPE_PLUGIN_DETAIL,
-					active: true,
-				});
-			}
-		}
+    // Remove existing listener if any to prevent duplicates
+    const existingHandler = handlers[eventType];
+    if (existingHandler) {
+      try {
+        element.removeEventListener(eventType, existingHandler);
+      } catch (error) {
+        console.warn(`Failed to remove existing ${eventType} listener:`, error);
+      }
+    }
 
-		// Set the leaf as active
-		if (leaf) {
-			workspace.setActiveLeaf(leaf, { focus: true });
+    // Store and add new listener
+    handlers[eventType] = handler;
+    element.addEventListener(eventType, handler);
+  }
 
-			// Load plugin details
-			if (leaf.view instanceof PluginDetailView) {
-				await leaf.view.loadPlugin(plugin);
+  /**
+   * Open the plugin list view based on settings
+   * Creates or activates the plugin list view in the configured location.
+   * Sets up event listeners for plugin selection after a short delay
+   * to ensure the view is fully initialized.
+   */
+  private async openPluginListView(): Promise<void> {
+    const { workspace } = this.app;
+    const location = this.settings.viewLocation;
 
-				// Listen for back navigation
-				leaf.view.containerEl.addEventListener("navigate-back", () => {
-					this.openPluginListView();
-				});
-			}
-		}
-	}
+    // Check if view is already open
+    let leaf: WorkspaceLeaf | null = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_PLUGIN_LIST);
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      // Create new leaf based on location preference
+      leaf = await this.createLeafInLocation(location);
+      if (leaf) {
+        await leaf.setViewState({
+          type: VIEW_TYPE_PLUGIN_LIST,
+          active: true,
+        });
+      }
+    }
+
+    // Set the leaf as active
+    if (leaf) {
+      workspace.setActiveLeaf(leaf, { focus: true });
+    }
+
+    // Wait for view to be ready, then set up event listener
+    // Use a named function so we can remove it later to prevent duplicates
+    if (leaf) {
+      // Small delay to ensure view is fully initialized before attaching event listeners
+      // This prevents race conditions where the view might not be ready to receive events
+      await new Promise((resolve) =>
+        window.setTimeout(
+          resolve,
+          PLUGIN_CONFIG.constants.viewInitializationDelay,
+        ),
+      );
+
+      // Listen for plugin selection events
+      if (leaf.view instanceof PluginListView) {
+        // Create handler for plugin selection
+        const handler: EventListener = async (event: Event) => {
+          if (isCustomEvent<CommunityPlugin>(event)) {
+            const plugin: CommunityPlugin = event.detail;
+            await this.openPluginDetailView(plugin);
+          }
+        };
+
+        // Register the event listener using helper method
+        this.registerCustomEventListener(
+          leaf.view.containerEl,
+          "plugin-selected",
+          handler,
+          leaf,
+        );
+      }
+    }
+  }
+
+  /**
+   * Create a leaf in the specified location
+   * Creates a new workspace leaf in the requested location (main, right sidebar, or new window)
+   * @param location The location where the leaf should be created
+   * @returns The created leaf, or null if creation failed
+   */
+  private async createLeafInLocation(
+    location: ViewLocation,
+  ): Promise<WorkspaceLeaf | null> {
+    const { workspace } = this.app;
+
+    switch (location) {
+      case "main": {
+        // Open in main editor area
+        return workspace.getLeaf(true);
+      }
+
+      case "window": {
+        // Open in new window
+        // Note: openPopoutLeaf may not be available in all Obsidian versions
+        try {
+          if (hasOpenPopoutLeaf(workspace)) {
+            return workspace.openPopoutLeaf();
+          }
+        } catch (error) {
+          console.warn("openPopoutLeaf not available:", error);
+        }
+        // Fallback to main area if popout not available
+        return workspace.getLeaf(true);
+      }
+
+      case "right":
+      default: {
+        // Open in right sidebar (default behavior)
+        const rightLeaf = workspace.getRightLeaf(false);
+        if (rightLeaf) {
+          return rightLeaf;
+        }
+        const mostRecent = workspace.getMostRecentLeaf();
+        if (mostRecent) {
+          return workspace.createLeafBySplit(mostRecent);
+        }
+        return workspace.getLeaf(true);
+      }
+    }
+  }
+
+  /**
+   * Open the plugin detail view
+   * Creates or activates the plugin detail view and loads the specified plugin's details.
+   * Sets up event listeners for back navigation.
+   * @param plugin The plugin to show details for
+   */
+  private async openPluginDetailView(plugin: CommunityPlugin): Promise<void> {
+    const { workspace } = this.app;
+    const location = this.settings.viewLocation;
+
+    // Create or get detail view leaf
+    let leaf: WorkspaceLeaf | null = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_PLUGIN_DETAIL);
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      // Create new leaf based on location preference
+      leaf = await this.createLeafInLocation(location);
+      if (leaf) {
+        await leaf.setViewState({
+          type: VIEW_TYPE_PLUGIN_DETAIL,
+          active: true,
+        });
+      }
+    }
+
+    // Set the leaf as active
+    if (leaf) {
+      workspace.setActiveLeaf(leaf, { focus: true });
+
+      // Load plugin details
+      if (leaf.view instanceof PluginDetailView) {
+        // Convert CommunityPlugin to PluginInfo format expected by loadPlugin
+        const pluginInfo: PluginInfo = {
+          ...plugin,
+          manifest: undefined,
+          readme: undefined,
+          installed: undefined,
+          installedVersion: undefined,
+        };
+        await leaf.view.loadPlugin(pluginInfo);
+
+        // Listen for back navigation
+        const backHandler: EventListener = () => {
+          this.openPluginListView();
+        };
+
+        // Register the event listener using helper method
+        this.registerCustomEventListener(
+          leaf.view.containerEl,
+          "navigate-back",
+          backHandler,
+          leaf,
+        );
+      }
+    }
+  }
 }
-

@@ -109,7 +109,7 @@ if (file instanceof TFile) {
 }
 ```
 
-**Writing Files**: 
+**Writing Files**:
 
 ```typescript
 await this.app.vault.create("path/to/file.md", content);
@@ -174,7 +174,7 @@ export class MyPluginSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.settingValue = value;
             await this.plugin.saveSettings();
-          })
+          }),
       );
   }
 }
@@ -183,6 +183,7 @@ export class MyPluginSettingTab extends PluginSettingTab {
 ## Plugin Installation
 
 Plugins are installed in `.obsidian/plugins/{plugin-id}/` and consist of:
+
 - `main.js`: Compiled JavaScript
 - `manifest.json`: Plugin metadata
 - `styles.css`: Optional styles
@@ -208,4 +209,3 @@ Plugins are installed in `.obsidian/plugins/{plugin-id}/` and consist of:
 - [Obsidian Plugin Developer Documentation](https://docs.obsidian.md/Plugins)
 - [Obsidian Sample Plugin](https://github.com/obsidianmd/obsidian-sample-plugin)
 - [Obsidian API Reference](https://github.com/obsidianmd/obsidian-api)
-
