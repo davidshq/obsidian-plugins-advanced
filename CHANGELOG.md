@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Improved error handling with dedicated methods for rate limits, 304 responses, and fetch errors
     - Enhanced cache validation and request header preparation logic
     - Added `setCacheDuration()` method for dynamic cache duration management
+    - Optimized release date fetching: cache check now prioritized over stats file (synchronous cache check before async stats fetch)
+    - Added `getCachedReleaseDate()` method for synchronous cache lookups
+    - Added `getReleaseDateFromStats()` helper method for optimized stats-based date retrieval
     - Better separation of concerns with private helper methods
   - `PluginListView.ts`: 
     - Major refactoring with extracted methods for better code organization

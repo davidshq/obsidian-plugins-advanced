@@ -540,8 +540,59 @@ export class PluginService {
   }
 
   /**
+   * Get release date from pre-loaded stats data
+   * This is an optimized version that uses already-loaded stats to avoid re-parsing
+   * @param plugin The plugin to get the release date for
+   * @param stats Pre-loaded stats data
+   * @returns The date of the latest release from stats, or null if not found
+   */
+  getReleaseDateFromStats(
+    plugin: CommunityPlugin,
+    stats: PluginStatsData,
+  ): Date | null {
+    const cacheKey = plugin.id;
+    const pluginStats = stats[plugin.id];
+    if (pluginStats?.updated) {
+      const date = new Date(pluginStats.updated);
+      if (!isNaN(date.getTime())) {
+        // Update cache for consistency
+        this.releaseDateCache.set(cacheKey, date);
+        this.releaseDateCacheTimestamps.set(cacheKey, Date.now());
+        return date;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get release date from cache if available
+   * Synchronous method to check cache without making any API calls
+   * @param pluginId The plugin ID to check
+   * @returns Object with date (Date | null) and found (boolean) indicating if cache was hit
+   *         - If found=true and date=null: plugin has no releases (cached)
+   *         - If found=false: plugin not in cache or cache expired
+   */
+  getCachedReleaseDate(pluginId: string): {
+    date: Date | null;
+    found: boolean;
+  } {
+    const cachedDate = this.releaseDateCache.get(pluginId);
+    const cacheTimestamp = this.releaseDateCacheTimestamps.get(pluginId);
+
+    if (
+      cachedDate !== undefined &&
+      cacheTimestamp !== undefined &&
+      Date.now() - cacheTimestamp < this.CACHE_DURATION
+    ) {
+      return { date: cachedDate, found: true };
+    }
+
+    return { date: null, found: false };
+  }
+
+  /**
    * Fetch the latest release date for a plugin
-   * First checks stats file (no API calls), then cache, then GitHub API as last resort
+   * Checks cache first (fastest), then stats file (no API calls), then GitHub API as last resort
    * Uses ETags to check if data has changed without downloading if unchanged
    * @param plugin The plugin to get the release date for
    * @param forceRefresh If true, bypasses cache and forces a fresh fetch
@@ -553,7 +604,22 @@ export class PluginService {
   ): Promise<Date | null> {
     const cacheKey = plugin.id;
 
-    // First, try to get data from stats file (no API calls)
+    // Check cache first (fastest, synchronous, no API calls)
+    // This is checked first because cache may have been populated from stats or previous API calls
+    if (!forceRefresh) {
+      const cachedDate = this.releaseDateCache.get(cacheKey);
+      const cacheTimestamp = this.releaseDateCacheTimestamps.get(cacheKey);
+
+      if (
+        cachedDate !== undefined &&
+        cacheTimestamp !== undefined &&
+        Date.now() - cacheTimestamp < this.CACHE_DURATION
+      ) {
+        return cachedDate;
+      }
+    }
+
+    // Second, try to get data from stats file (no API calls, but async)
     if (!forceRefresh) {
       try {
         const stats = await this.fetchPluginStats(false);
@@ -570,25 +636,12 @@ export class PluginService {
           }
         }
       } catch (error) {
-        // Stats file unavailable or error - continue to cache/API fallback
+        // Stats file unavailable or error - continue to API fallback
         console.warn(
-          `Failed to get release date from stats for ${plugin.id}, trying cache/API:`,
+          `Failed to get release date from stats for ${plugin.id}, trying API:`,
           error,
         );
       }
-    }
-
-    // Check cache second
-    const cachedDate = this.releaseDateCache.get(cacheKey);
-    const cacheTimestamp = this.releaseDateCacheTimestamps.get(cacheKey);
-
-    if (
-      !forceRefresh &&
-      cachedDate !== undefined &&
-      cacheTimestamp !== undefined &&
-      Date.now() - cacheTimestamp < this.CACHE_DURATION
-    ) {
-      return cachedDate;
     }
 
     // Check error cache - if we recently had a non-404 error, return null without retrying
@@ -612,6 +665,8 @@ export class PluginService {
     // Handle 304 response (data hasn't changed)
     if (release === null) {
       // Check if we have cached date (304 response means data hasn't changed)
+      // Re-check cache in case it was populated between our initial check and now
+      const cachedDate = this.releaseDateCache.get(cacheKey);
       if (cachedDate !== undefined) {
         this.releaseDateCacheTimestamps.set(cacheKey, Date.now());
         return cachedDate;

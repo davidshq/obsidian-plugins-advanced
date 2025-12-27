@@ -646,6 +646,153 @@ describe("PluginService", () => {
     });
   });
 
+  describe("getReleaseDateFromStats", () => {
+    it("should extract release date from stats data", () => {
+      const stats = {
+        "plugin-1": {
+          id: "plugin-1",
+          updated: "2024-01-15T12:00:00Z",
+          downloads: 1000,
+        },
+      };
+
+      const result = pluginService.getReleaseDateFromStats(
+        mockPlugins[0],
+        stats,
+      );
+
+      expect(result).toEqual(new Date("2024-01-15T12:00:00Z"));
+    });
+
+    it("should return null when plugin not in stats", () => {
+      const stats = {
+        "other-plugin": {
+          id: "other-plugin",
+          updated: "2024-01-15T12:00:00Z",
+        },
+      };
+
+      const result = pluginService.getReleaseDateFromStats(
+        mockPlugins[0],
+        stats,
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("should return null when plugin stats has no updated field", () => {
+      const stats = {
+        "plugin-1": {
+          id: "plugin-1",
+          downloads: 1000,
+        },
+      };
+
+      const result = pluginService.getReleaseDateFromStats(
+        mockPlugins[0],
+        stats,
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("should return null when updated field is invalid date", () => {
+      const stats = {
+        "plugin-1": {
+          id: "plugin-1",
+          updated: "invalid-date",
+        },
+      };
+
+      const result = pluginService.getReleaseDateFromStats(
+        mockPlugins[0],
+        stats,
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("should update cache when extracting date from stats", async () => {
+      const stats = {
+        "plugin-1": {
+          id: "plugin-1",
+          updated: "2024-01-15T12:00:00Z",
+        },
+      };
+
+      pluginService.getReleaseDateFromStats(mockPlugins[0], stats);
+
+      // Verify cache was updated by checking that getLatestReleaseDate uses it
+      // (without making API calls)
+      vi.clearAllMocks();
+      const result = await pluginService.getLatestReleaseDate(
+        mockPlugins[0],
+        false,
+      );
+      expect(result).toEqual(new Date("2024-01-15T12:00:00Z"));
+      // Should not make API calls since we have cached data
+      expect(requestUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getCachedReleaseDate", () => {
+    it("should return cached date if available and not expired", () => {
+      const releaseDate = new Date("2024-01-15T12:00:00Z");
+      pluginService["releaseDateCache"].set("plugin-1", releaseDate);
+      pluginService["releaseDateCacheTimestamps"].set("plugin-1", Date.now());
+
+      const result = pluginService.getCachedReleaseDate("plugin-1");
+
+      expect(result.found).toBe(true);
+      expect(result.date).toEqual(releaseDate);
+    });
+
+    it("should return found=false when plugin not in cache", () => {
+      const result = pluginService.getCachedReleaseDate("non-existent-plugin");
+
+      expect(result.found).toBe(false);
+      expect(result.date).toBeNull();
+    });
+
+    it("should return found=false when cache is expired", () => {
+      const releaseDate = new Date("2024-01-15T12:00:00Z");
+      pluginService["releaseDateCache"].set("plugin-1", releaseDate);
+      // Set timestamp to 2 hours ago (expired if cache duration is 1 hour)
+      pluginService["releaseDateCacheTimestamps"].set(
+        "plugin-1",
+        Date.now() - 2 * 60 * 60 * 1000,
+      );
+
+      const result = pluginService.getCachedReleaseDate("plugin-1");
+
+      expect(result.found).toBe(false);
+      expect(result.date).toBeNull();
+    });
+
+    it("should return found=true with date=null when cached as null (no releases)", () => {
+      // Cache null to indicate plugin has no releases
+      pluginService["releaseDateCache"].set("plugin-1", null);
+      pluginService["releaseDateCacheTimestamps"].set("plugin-1", Date.now());
+
+      const result = pluginService.getCachedReleaseDate("plugin-1");
+
+      // Should return found=true with date=null to indicate we know it has no releases
+      expect(result.found).toBe(true);
+      expect(result.date).toBeNull();
+    });
+
+    it("should return found=false when cache timestamp is missing", () => {
+      const releaseDate = new Date("2024-01-15T12:00:00Z");
+      pluginService["releaseDateCache"].set("plugin-1", releaseDate);
+      // Don't set timestamp
+
+      const result = pluginService.getCachedReleaseDate("plugin-1");
+
+      expect(result.found).toBe(false);
+      expect(result.date).toBeNull();
+    });
+  });
+
   describe("clearCache", () => {
     it("should clear all caches", async () => {
       vi.resetAllMocks();

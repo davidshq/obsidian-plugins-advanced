@@ -8,6 +8,7 @@ import {
   DisplayMode,
   SearchFilters,
   PluginSortOption,
+  PluginStatsData,
 } from "../types";
 import { PluginService } from "../services/PluginService";
 import { InstallationService } from "../services/InstallationService";
@@ -790,54 +791,106 @@ export class PluginListView extends ItemView {
 
   /**
    * Process plugins in batches for date filtering
-   * Iterates through plugins in batches, checking abort signal and processing each batch
+   * First filters plugins synchronously using stats (fast, shows results immediately),
+   * then processes remaining plugins that need API calls in batches
+   * Uses pre-loaded stats data when available to avoid re-parsing the stats file
    * @param plugins Array of plugins to filter
    * @param updatedAfterNormalized The normalized date to compare against
    * @param signal AbortSignal to cancel the operation if needed
+   * @param stats Pre-loaded stats data (optional, will be fetched if not provided)
    * @returns Filtered array of plugins matching the date filter
    */
   private async processDateFilterBatches(
     plugins: CommunityPlugin[],
     updatedAfterNormalized: Date,
     signal: AbortSignal,
+    stats: PluginStatsData | null = null,
   ): Promise<CommunityPlugin[]> {
     const filteredWithDates: CommunityPlugin[] = [];
-    // Process plugins in batches to avoid rate limiting while improving performance
-    // GitHub API allows 60 requests/hour for unauthenticated requests
-    // Using batch size of 10 with small delay between batches provides good balance
-    // These values balance performance with rate limit compliance
-    const BATCH_SIZE = PLUGIN_CONFIG.constants.batchSize;
-    const BATCH_DELAY_MS = PLUGIN_CONFIG.constants.batchDelay;
+    const pluginsNeedingApiCall: CommunityPlugin[] = [];
 
-    for (let i = 0; i < plugins.length; i += BATCH_SIZE) {
-      // Check if operation was aborted
+    // First pass: Filter plugins synchronously using stats and cache (fast, no API calls)
+    // This shows results immediately for plugins in stats
+    for (const plugin of plugins) {
       if (signal.aborted) {
         return [];
       }
 
-      const batch = plugins.slice(i, i + BATCH_SIZE);
+      let releaseDate: Date | null = null;
 
-      // Process batch in parallel for better performance
-      const batchResults = await this.processDateFilterBatch(
-        batch,
-        updatedAfterNormalized,
-      );
-
-      // Check again after async operation
-      if (signal.aborted) {
-        return [];
+      // Try stats first (synchronous, fast)
+      if (stats) {
+        releaseDate = this.pluginService.getReleaseDateFromStats(plugin, stats);
       }
 
-      // Add valid results to filtered list
-      for (const result of batchResults) {
-        if (result) {
-          filteredWithDates.push(result);
+      // Try cache second (synchronous, fast)
+      if (!releaseDate) {
+        const cached = this.pluginService.getCachedReleaseDate(plugin.id);
+        if (cached.found) {
+          // Cache hit - use cached value (may be null if plugin has no releases)
+          releaseDate = cached.date;
+          // If cached as null (no releases), exclude from results (don't add to API call list)
+          if (releaseDate === null) {
+            continue; // Skip this plugin, it has no releases
+          }
         }
       }
 
-      // Add delay between batches to avoid rate limiting (except for last batch)
-      if (i + BATCH_SIZE < plugins.length) {
-        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+      // If we have a date, check if it matches the filter
+      if (releaseDate) {
+        const releaseDateNormalized = new Date(
+          Date.UTC(
+            releaseDate.getUTCFullYear(),
+            releaseDate.getUTCMonth(),
+            releaseDate.getUTCDate(),
+          ),
+        );
+        if (releaseDateNormalized >= updatedAfterNormalized) {
+          filteredWithDates.push(plugin);
+        }
+      } else {
+        // Plugin not in stats or cache, needs API call
+        pluginsNeedingApiCall.push(plugin);
+      }
+    }
+
+    // Second pass: Process plugins that need API calls in batches
+    // This is slower but necessary for plugins not in stats
+    if (pluginsNeedingApiCall.length > 0) {
+      const BATCH_SIZE = PLUGIN_CONFIG.constants.batchSize;
+      const BATCH_DELAY_MS = PLUGIN_CONFIG.constants.batchDelay;
+
+      for (let i = 0; i < pluginsNeedingApiCall.length; i += BATCH_SIZE) {
+        // Check if operation was aborted
+        if (signal.aborted) {
+          return filteredWithDates; // Return what we have so far
+        }
+
+        const batch = pluginsNeedingApiCall.slice(i, i + BATCH_SIZE);
+
+        // Process batch in parallel for better performance
+        const batchResults = await this.processDateFilterBatch(
+          batch,
+          updatedAfterNormalized,
+          stats,
+        );
+
+        // Check again after async operation
+        if (signal.aborted) {
+          return filteredWithDates; // Return what we have so far
+        }
+
+        // Add valid results to filtered list
+        for (const result of batchResults) {
+          if (result) {
+            filteredWithDates.push(result);
+          }
+        }
+
+        // Add delay between batches to avoid rate limiting (except for last batch)
+        if (i + BATCH_SIZE < pluginsNeedingApiCall.length) {
+          await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+        }
       }
     }
 
@@ -847,6 +900,7 @@ export class PluginListView extends ItemView {
   /**
    * Apply date filter to plugins based on latest release date
    * Uses batched parallel requests to check release dates efficiently
+   * Pre-loads stats file once to avoid parsing it multiple times
    * @param plugins Array of plugins to filter
    * @param signal AbortSignal to cancel the operation if needed
    * @returns Filtered array of plugins updated after the selected date
@@ -877,10 +931,20 @@ export class PluginListView extends ItemView {
     this.updateLoadingState();
 
     try {
+      // Pre-load stats file once before filtering to avoid parsing it multiple times
+      // This significantly improves performance when filtering many plugins
+      debugLog("Pre-loading stats file for date filtering...");
+      const stats = await this.pluginService.fetchPluginStats(false);
+      debugLog(
+        "Stats file loaded:",
+        stats ? `${Object.keys(stats).length} plugins` : "not available",
+      );
+
       const filteredWithDates = await this.processDateFilterBatches(
         plugins,
         updatedAfterNormalized,
         signal,
+        stats,
       );
 
       debugLog(
@@ -897,18 +961,48 @@ export class PluginListView extends ItemView {
   /**
    * Process a batch of plugins to check their release dates
    * Checks release dates for all plugins in the batch in parallel for better performance
+   * Uses pre-loaded stats data when available to avoid re-parsing the stats file
    * @param batch Array of plugins in the current batch
    * @param updatedAfterNormalized The normalized date (midnight UTC) to compare against
+   * @param stats Pre-loaded stats data (optional, will be used if available)
    * @returns Array of plugins that match the date filter (updated on or after the date), or null for plugins that don't match or have no release date
    */
   private async processDateFilterBatch(
     batch: CommunityPlugin[],
     updatedAfterNormalized: Date,
+    stats: PluginStatsData | null = null,
   ): Promise<(CommunityPlugin | null)[]> {
     const batchPromises = batch.map(async (plugin) => {
       try {
-        const releaseDate =
-          await this.pluginService.getLatestReleaseDate(plugin);
+        let releaseDate: Date | null = null;
+
+        // First, try to get date from pre-loaded stats (fastest, no API calls)
+        if (stats) {
+          releaseDate = this.pluginService.getReleaseDateFromStats(
+            plugin,
+            stats,
+          );
+        }
+
+        // Second, check cache (synchronous, no API calls)
+        if (!releaseDate) {
+          const cached = this.pluginService.getCachedReleaseDate(plugin.id);
+          if (cached.found) {
+            // Cache hit - use cached value (may be null if plugin has no releases)
+            releaseDate = cached.date;
+            // If cached as null (no releases), exclude from results
+            if (releaseDate === null) {
+              return null; // Plugin has no releases, exclude from results
+            }
+          }
+        }
+
+        // Last resort: fall back to getLatestReleaseDate (may make API calls)
+        // This handles plugins not in stats file or cache
+        // Note: getLatestReleaseDate will skip stats fetch since we already checked
+        if (!releaseDate) {
+          releaseDate = await this.pluginService.getLatestReleaseDate(plugin);
+        }
 
         if (releaseDate) {
           // Normalize release date to midnight UTC for date-only comparison
