@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+main.js.map
+styles.css
+styles.css.map
+
+# Environment
+.DS_Store
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ESLint
+.eslintcache
+
+# Obsidian
+.obsidian/
+
