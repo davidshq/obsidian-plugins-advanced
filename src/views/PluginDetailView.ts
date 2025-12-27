@@ -73,12 +73,22 @@ export class PluginDetailView extends ItemView {
   /**
    * Initialize the view when it is opened
    * Sets up the container element and prepares it for content
+   * Registers Escape key handler to close the view
    */
   async onOpen() {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass("plugin-detail-container");
+    container.setAttribute("role", "region");
+    container.setAttribute("aria-label", "Plugin details");
     this.contentEl = container;
+
+    // Add Escape key support to close the view
+    this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") {
+        this.close();
+      }
+    });
   }
 
   /**
@@ -170,9 +180,10 @@ export class PluginDetailView extends ItemView {
   private renderLoading(): void {
     if (!this.contentEl) return;
     this.contentEl.empty();
-    this.contentEl
-      .createDiv("loading-message")
-      .setText("Loading plugin details...");
+    const loadingMsg = this.contentEl.createDiv("loading-message");
+    loadingMsg.setText("Loading plugin details...");
+    loadingMsg.setAttribute("role", "status");
+    loadingMsg.setAttribute("aria-live", "polite");
   }
 
   /**
@@ -183,7 +194,10 @@ export class PluginDetailView extends ItemView {
   private renderError(message: string): void {
     if (!this.contentEl) return;
     this.contentEl.empty();
-    this.contentEl.createDiv("error-message").setText(message);
+    const errorMsg = this.contentEl.createDiv("error-message");
+    errorMsg.setText(message);
+    errorMsg.setAttribute("role", "alert");
+    errorMsg.setAttribute("aria-live", "assertive");
   }
 
   /**
@@ -215,6 +229,7 @@ export class PluginDetailView extends ItemView {
    * Render plugin details
    * Creates the full plugin detail view including header, stats, description,
    * action buttons, and README content rendered as markdown
+   * Includes accessibility attributes (ARIA labels, roles) for all interactive elements
    */
   private renderPluginDetails(): void {
     if (!this.contentEl || !this.pluginInfo) return;
@@ -226,8 +241,13 @@ export class PluginDetailView extends ItemView {
     const backBtn = header.createEl("button", {
       cls: "back-button",
       text: "← Back",
+      attr: {
+        "aria-label": "Go back to plugin list",
+        type: "button",
+      },
     });
     // Use registerDomEvent for automatic cleanup
+    // Note: Native HTML buttons handle Enter/Space keys automatically, so no explicit keyboard handler needed
     this.registerDomEvent(backBtn, "click", () => {
       this.goBack();
     });
@@ -235,17 +255,23 @@ export class PluginDetailView extends ItemView {
     const closeBtn = header.createEl("button", {
       cls: "close-button",
       text: "×",
+      attr: {
+        "aria-label": "Close plugin detail view",
+        type: "button",
+      },
     });
     // Use registerDomEvent for automatic cleanup
+    // Note: Native HTML buttons handle Enter/Space keys automatically, so no explicit keyboard handler needed
     this.registerDomEvent(closeBtn, "click", () => {
       this.close();
     });
 
     // Plugin title
-    this.contentEl.createEl("h1", {
+    const titleEl = this.contentEl.createEl("h1", {
       cls: "plugin-detail-title",
       text: this.pluginInfo.name,
     });
+    titleEl.setAttribute("id", "plugin-detail-title");
 
     // Plugin stats and metadata
     const stats = this.contentEl.createDiv("plugin-detail-stats");
@@ -263,6 +289,12 @@ export class PluginDetailView extends ItemView {
       const authorLink = author.createEl("a", {
         href: this.pluginInfo.manifest.authorUrl || "#",
         text: this.pluginInfo.manifest.author,
+        attr: {
+          "aria-label": `Author: ${this.pluginInfo.manifest.author}`,
+          ...(this.pluginInfo.manifest.authorUrl
+            ? { target: "_blank", rel: "noopener noreferrer" }
+            : { "aria-disabled": "true" }),
+        },
       });
       if (!this.pluginInfo.manifest.authorUrl) {
         authorLink.addClass("author-link-disabled");
@@ -275,7 +307,11 @@ export class PluginDetailView extends ItemView {
       repo.createEl("a", {
         href: `https://github.com/${this.pluginInfo.repo}`,
         text: this.pluginInfo.repo,
-        attr: { target: "_blank" },
+        attr: {
+          target: "_blank",
+          rel: "noopener noreferrer",
+          "aria-label": `Repository: ${this.pluginInfo.repo} (opens in new tab)`,
+        },
       });
 
       if (this.pluginInfo.manifest.minAppVersion) {
@@ -305,6 +341,10 @@ export class PluginDetailView extends ItemView {
       const updateBtn = actions.createEl("button", {
         cls: "update-button",
         text: `Update to ${this.pluginInfo.manifest.version}`,
+        attr: {
+          "aria-label": `Update plugin to version ${this.pluginInfo.manifest.version}`,
+          type: "button",
+        },
       });
       // Use registerDomEvent for automatic cleanup
       this.registerDomEvent(updateBtn, "click", () => {
@@ -315,6 +355,12 @@ export class PluginDetailView extends ItemView {
     const installBtn = actions.createEl("button", {
       cls: "install-button",
       text: this.pluginInfo.installed ? "Uninstall" : "Install",
+      attr: {
+        "aria-label": this.pluginInfo.installed
+          ? `Uninstall ${this.pluginInfo.name}`
+          : `Install ${this.pluginInfo.name}`,
+        type: "button",
+      },
     });
     // Use registerDomEvent for automatic cleanup
     this.registerDomEvent(installBtn, "click", () => {
@@ -324,6 +370,10 @@ export class PluginDetailView extends ItemView {
     const shareBtn = actions.createEl("button", {
       cls: "share-button",
       text: "Copy share link",
+      attr: {
+        "aria-label": "Copy plugin repository link to clipboard",
+        type: "button",
+      },
     });
     // Use registerDomEvent for automatic cleanup
     this.registerDomEvent(shareBtn, "click", () => {
@@ -334,6 +384,10 @@ export class PluginDetailView extends ItemView {
       const donateBtn = actions.createEl("button", {
         cls: "donate-button",
         text: "Donate",
+        attr: {
+          "aria-label": `Donate to ${this.pluginInfo.manifest.author}`,
+          type: "button",
+        },
       });
       // Use registerDomEvent for automatic cleanup
       this.registerDomEvent(donateBtn, "click", () => {

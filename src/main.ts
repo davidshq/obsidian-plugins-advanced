@@ -28,14 +28,14 @@ const DEFAULT_SETTINGS: PluginSettings = {
     showInstalledOnly: false,
   },
   paginationThreshold: 200, // Default: load more when within 200px of bottom
+  dataRefreshIntervalMinutes: 30, // Default: refresh every 30 minutes (2x/hour)
 };
 
 export default class CommunityPluginBrowserPlugin extends Plugin {
   settings!: PluginSettings;
   pluginService!: PluginService; // Made public for settings access
   private installationService!: InstallationService;
-  private readonly BACKGROUND_REFRESH_INTERVAL =
-    PLUGIN_CONFIG.constants.backgroundRefreshInterval;
+  private backgroundRefreshIntervalId: number | undefined = undefined;
   private eventHandlers: Map<WorkspaceLeaf, Record<string, EventListener>> =
     new Map();
 
@@ -53,6 +53,9 @@ export default class CommunityPluginBrowserPlugin extends Plugin {
     // Initialize services
     this.pluginService = new PluginService();
     this.installationService = new InstallationService(this.app);
+
+    // Update cache duration based on refresh interval setting
+    this.updateCacheDuration();
 
     // Preload plugin data and stats in the background for faster initial view load
     // This ensures cached data is available immediately when the view opens
@@ -179,12 +182,45 @@ export default class CommunityPluginBrowserPlugin extends Plugin {
   }
 
   /**
-   * Start background refresh mechanism
-   * Checks for plugin updates every 30 minutes using conditional requests.
-   * Only downloads data if it has actually changed (via ETags).
-   * Uses registerInterval() for automatic cleanup on plugin unload.
+   * Get the background refresh interval in milliseconds
+   * Uses the user's setting or defaults to 30 minutes (2x/hour)
+   * @returns Refresh interval in milliseconds
    */
-  private startBackgroundRefresh(): void {
+  private getBackgroundRefreshInterval(): number {
+    const minutes = this.settings.dataRefreshIntervalMinutes ?? 30;
+    return minutes * 60 * 1000; // Convert minutes to milliseconds
+  }
+
+  /**
+   * Calculate cache duration based on refresh interval
+   * Cache duration is refresh interval + 5 minute buffer to account for timing variations
+   * @returns Cache duration in milliseconds
+   */
+  private getCacheDuration(): number {
+    const refreshIntervalMs = this.getBackgroundRefreshInterval();
+    const bufferMs = 5 * 60 * 1000; // 5 minute buffer
+    return refreshIntervalMs + bufferMs;
+  }
+
+  /**
+   * Update cache duration in PluginService based on current settings
+   * Should be called when settings change
+   */
+  private updateCacheDuration(): void {
+    if (this.pluginService) {
+      const cacheDuration = this.getCacheDuration();
+      this.pluginService.setCacheDuration(cacheDuration);
+    }
+  }
+
+  /**
+   * Start background refresh mechanism
+   * Checks for plugin updates at the configured interval using conditional requests.
+   * Only downloads data if it has actually changed (via ETags).
+   * Restarts the interval if it's already running (e.g., when settings change).
+   * Made public so settings tab can restart it when refresh interval changes.
+   */
+  startBackgroundRefresh(): void {
     // Ensure services are initialized before starting refresh
     if (!this.pluginService) {
       console.warn(
@@ -193,24 +229,31 @@ export default class CommunityPluginBrowserPlugin extends Plugin {
       return;
     }
 
+    // Stop existing interval if running (e.g., settings changed)
+    // clearInterval is safe to call with undefined, so no check needed
+    window.clearInterval(this.backgroundRefreshIntervalId);
+
+    const intervalMs = this.getBackgroundRefreshInterval();
+
     // Set up interval to refresh plugins and stats periodically
     // Uses conditional requests (ETags) so only downloads if data changed
-    // registerInterval() automatically cleans up on plugin unload
-    this.registerInterval(
-      window.setInterval(async () => {
-        try {
-          if (this.pluginService) {
-            // Refresh both plugins and stats in parallel
-            await Promise.all([
-              this.pluginService.refreshPluginsIfChanged(),
-              this.pluginService.fetchPluginStats(false), // Uses conditional request
-            ]);
-          }
-        } catch (error) {
-          console.warn("Background refresh failed:", error);
+    const intervalId = window.setInterval(async () => {
+      try {
+        if (this.pluginService) {
+          // Refresh both plugins and stats in parallel
+          await Promise.all([
+            this.pluginService.refreshPluginsIfChanged(),
+            this.pluginService.fetchPluginStats(false), // Uses conditional request
+          ]);
         }
-      }, this.BACKGROUND_REFRESH_INTERVAL),
-    );
+      } catch (error) {
+        console.warn("Background refresh failed:", error);
+      }
+    }, intervalMs);
+
+    // Store interval ID and register for automatic cleanup on plugin unload
+    this.backgroundRefreshIntervalId = intervalId;
+    this.registerInterval(intervalId);
   }
 
   /**

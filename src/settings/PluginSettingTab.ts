@@ -91,6 +91,52 @@ export class PluginSettingTab extends ObsidianPluginSettingTab {
           });
       });
 
+    // Data refresh settings section
+    containerEl.createEl("h3", { text: "Data Refresh Settings" });
+
+    new Setting(containerEl)
+      .setName("Data Refresh Interval")
+      .setDesc(
+        "How often to refresh plugin data and statistics (in minutes). " +
+          "The plugin will check for updates at this interval. " +
+          "Default: 30 minutes (2x/hour). " +
+          "Lower values provide fresher data but make more GitHub API calls. " +
+          "Cache duration is automatically set to refresh interval + 5 minutes buffer.",
+      )
+      .addText((text) => {
+        text
+          .setPlaceholder("30")
+          .setValue(
+            String(this.plugin.settings.dataRefreshIntervalMinutes ?? 30),
+          )
+          .onChange(async (value) => {
+            const numValue = parseInt(value, 10);
+            // Validate: must be a valid number, positive, and reasonable (1-1440 minutes = 1 day max)
+            if (!isNaN(numValue) && numValue >= 1 && numValue <= 1440) {
+              this.plugin.settings.dataRefreshIntervalMinutes = numValue;
+              await this.plugin.saveSettings();
+
+              // Update cache duration based on new refresh interval
+              const refreshIntervalMs = numValue * 60 * 1000;
+              const bufferMs = 5 * 60 * 1000; // 5 minute buffer
+              const cacheDurationMs = refreshIntervalMs + bufferMs;
+              this.plugin.pluginService.setCacheDuration(cacheDurationMs);
+
+              // Restart background refresh with new interval
+              this.plugin.startBackgroundRefresh();
+
+              showSuccess(
+                `Refresh interval updated to ${numValue} minutes. Background refresh restarted.`,
+              );
+            } else if (value !== "") {
+              // Invalid input - reset to current value if not empty
+              text.setValue(
+                String(this.plugin.settings.dataRefreshIntervalMinutes ?? 30),
+              );
+            }
+          });
+      });
+
     // Cache management section
     containerEl.createEl("h3", { text: "Cache Management" });
 

@@ -1,11 +1,18 @@
 /**
  * Configuration constants for the Community Plugin Browser
+ *
+ * Centralizes all configuration values including URLs, timeouts, batch sizes,
+ * and other constants used throughout the plugin. This makes it easier to
+ * tune performance and maintain consistency.
  */
 
 import { PluginConfig } from "./types";
 
 /**
- * Default configuration values
+ * Default configuration values for the plugin
+ *
+ * Contains all URLs, timeouts, batch processing settings, and other constants.
+ * All magic numbers should be moved here for easier maintenance and tuning.
  */
 export const PLUGIN_CONFIG: PluginConfig = {
   urls: {
@@ -18,8 +25,7 @@ export const PLUGIN_CONFIG: PluginConfig = {
     githubReleases: "https://github.com",
   },
   constants: {
-    cacheDuration: 60 * 60 * 1000, // 1 hour
-    releaseDateCacheDuration: 24 * 60 * 60 * 1000, // 24 hours
+    cacheDuration: 60 * 60 * 1000, // 1 hour (default, updated based on refresh interval)
     errorCacheDuration: 5 * 60 * 1000, // 5 minutes
     backgroundRefreshInterval: 30 * 60 * 1000, // 30 minutes
     viewInitializationDelay: 100, // 100ms
@@ -28,6 +34,12 @@ export const PLUGIN_CONFIG: PluginConfig = {
     debounceDelay: 300, // 300ms debounce delay
     statusCheckBatchSize: 20, // Check 20 plugin statuses at a time
     pluginsPerPage: 100, // Number of plugins to show per page (pagination)
+    /** Number of plugins to process in parallel when fetching release info */
+    releaseInfoBatchSize: 5,
+    /** Delay in milliseconds between batches when processing release info to avoid GitHub API rate limits */
+    releaseInfoBatchDelay: 2000,
+    /** Debounce period in milliseconds for rate limit error notifications to prevent spam */
+    rateLimitErrorDebounceMs: 20000,
     retry: {
       maxRetries: 3, // Maximum number of retry attempts
       initialDelay: 1000, // Initial delay in milliseconds (1 second)

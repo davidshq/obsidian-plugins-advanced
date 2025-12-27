@@ -4,6 +4,7 @@
 
 import { Notice, WorkspaceLeaf } from "obsidian";
 import { CommunityPlugin, PluginInfo } from "./types";
+import { PLUGIN_CONFIG } from "./config";
 export { debugLog, debugLogLabel } from "./utils/debug";
 
 /**
@@ -132,11 +133,10 @@ export function checkRateLimit(
 
 // Track last rate limit error notification time to debounce
 let lastRateLimitErrorTime = 0;
-const RATE_LIMIT_ERROR_DEBOUNCE_MS = 20000; // 20 seconds - only show error once per 20 seconds
 
 /**
  * Show a rate limit error notification to the user
- * Debounced to prevent spam - only shows once per 20 seconds
+ * Debounced to prevent spam - only shows once per configured debounce period
  * @param resetTime Optional time when the rate limit resets
  * @param customMessage Optional custom message
  */
@@ -147,7 +147,10 @@ export function showRateLimitError(
   const now = Date.now();
 
   // Debounce: only show error if enough time has passed since last notification
-  if (now - lastRateLimitErrorTime < RATE_LIMIT_ERROR_DEBOUNCE_MS) {
+  if (
+    now - lastRateLimitErrorTime <
+    PLUGIN_CONFIG.constants.rateLimitErrorDebounceMs
+  ) {
     // Silently skip - error was shown recently
     return;
   }
@@ -580,15 +583,21 @@ export async function retryRequest<T>(
 /**
  * Determine if an HTTP error should be retried
  * Retries on network errors and 5xx server errors, but not on 4xx client errors
- * Note: The attempt limit is handled by retryRequest, so this function only checks error types
+ * Also respects the maximum retry attempt limit (default: 3)
  * @param error The error to check
- * @param _attempt The current attempt number (unused, kept for compatibility with RetryOptions.shouldRetry signature)
- * @returns True if the error should be retried based on error type
+ * @param attempt The current attempt number (1-based)
+ * @param maxAttempts Maximum number of retry attempts (default: 3)
+ * @returns True if the error should be retried based on error type and attempt count
  */
 export function shouldRetryHttpError(
   error: unknown,
-  _attempt: number,
+  attempt: number,
+  maxAttempts: number = 3,
 ): boolean {
+  // Don't retry if we've exceeded the maximum number of attempts
+  if (attempt >= maxAttempts) {
+    return false;
+  }
   // If it's an Error object, check the message
   if (error instanceof Error) {
     const message = error.message.toLowerCase();

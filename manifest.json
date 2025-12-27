@@ -4,8 +4,8 @@
   "version": "0.2.0",
   "minAppVersion": "0.15.0",
   "description": "Browse and install community plugins from within Obsidian",
-  "author": "",
-  "authorUrl": "",
+  "author": "Dave Mackey",
+  "authorUrl": "https://davemackey.net/",
   "fundingUrl": "",
   "isDesktopOnly": false
 }

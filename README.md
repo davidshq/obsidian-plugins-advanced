@@ -181,9 +181,19 @@ These files are then placed in `.obsidian/plugins/{plugin-id}/` directory.
 ## Data Sources
 
 - **Plugin List**: `https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json`
+- **Plugin Statistics**: `https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugin-stats.json` (download counts, update dates)
 - **Plugin Manifest**: `https://raw.githubusercontent.com/{repo}/{branch}/manifest.json`
 - **Plugin README**: `https://raw.githubusercontent.com/{repo}/{branch}/README.md`
 - **Plugin Releases**: `https://github.com/{repo}/releases/download/{version}/{file}`
+
+## Settings
+
+The plugin includes configurable settings accessible via Obsidian's Settings → Community Plugin Browser:
+
+- **View Location**: Choose where the plugin browser opens (right sidebar, main editor, or new window)
+- **Data Refresh Interval**: How often to refresh plugin data (default: 30 minutes = 2x/hour). The cache duration is automatically set to refresh interval + 5 minutes to ensure data freshness.
+- **Pagination Threshold**: Distance from bottom to trigger auto-loading more plugins
+- **Clear Cache**: Manually clear all cached data and force a fresh fetch
 
 ## Troubleshooting
 

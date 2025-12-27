@@ -47,6 +47,7 @@ export class PluginListView extends ItemView {
   private modeToggleEl: HTMLElement | null = null;
   private filterAbortController: AbortController | null = null;
   private installedStatusCache: Map<string, boolean> = new Map();
+  private isCheckingInstalledStatus = false; // Prevent concurrent status checks
   private refreshButtonEl: HTMLElement | null = null;
   private sortOption: PluginSortOption = "name";
   private sortDirection: "asc" | "desc" = "asc";
@@ -116,6 +117,7 @@ export class PluginListView extends ItemView {
   /**
    * Initialize the view when it is opened
    * Loads settings, creates the UI, and loads plugins with cache optimization
+   * Sets initial focus to search input for keyboard users
    */
   async onOpen() {
     const container = this.containerEl.children[1] as HTMLElement;
@@ -143,10 +145,21 @@ export class PluginListView extends ItemView {
     // Create plugins container
     this.pluginsContainerEl = container.createDiv("plugins-container");
     this.pluginsContainerEl.addClass(this.displayMode);
+    this.pluginsContainerEl.setAttribute("role", "region");
+    this.pluginsContainerEl.setAttribute("aria-label", "Plugin list");
+    this.pluginsContainerEl.setAttribute("aria-live", "polite");
 
     // Restore search input value
     if (this.searchInputEl && this.searchFilters.query) {
       this.searchInputEl.value = this.searchFilters.query;
+    }
+
+    // Set initial focus to search input for keyboard users
+    if (this.searchInputEl) {
+      // Use setTimeout to ensure the view is fully rendered
+      setTimeout(() => {
+        this.searchInputEl?.focus();
+      }, 0);
     }
 
     // Restore date filter
@@ -217,23 +230,24 @@ export class PluginListView extends ItemView {
   }
 
   /**
-   * Create the header with search bar and controls
-   * Sets up search input, filters, display mode toggle, and refresh button.
-   * Initializes event listeners for search (debounced), filters, sorting, and display mode.
-   * @param container The container element to add the header to
+   * Create search bar with input and refresh button
+   * Sets up debounced search input handler and accessibility attributes
+   * @param header The header element to add the search bar to
    * @returns void
    */
-  private createHeader(container: HTMLElement): void {
-    const header = container.createDiv("plugin-browser-header");
-
-    // Search bar with refresh button
+  private createSearchBar(header: HTMLElement): void {
     const searchContainer = header.createDiv("search-container");
     const searchIcon = searchContainer.createSpan("search-icon");
     searchIcon.setText("🔍");
+    searchIcon.setAttribute("aria-hidden", "true"); // Decorative icon
     this.searchInputEl = searchContainer.createEl("input", {
       type: "text",
       placeholder: "Search community plugins...",
       cls: "search-input",
+      attr: {
+        "aria-label": "Search community plugins",
+        role: "searchbox",
+      },
     });
     // Track debounced handler for manual cleanup
     const searchHandler = debounce(async () => {
@@ -261,82 +275,48 @@ export class PluginListView extends ItemView {
     this.registerDomEvent(this.refreshButtonEl, "click", async () => {
       await this.refreshPlugins();
     });
+  }
 
-    // Controls row
-    const controlsRow = header.createDiv("controls-row");
+  /**
+   * Handle date filter input changes
+   * Validates and parses date input, updates filter state
+   * @returns Promise that resolves when filter is updated
+   */
+  private async handleDateFilterChange(): Promise<void> {
+    const dateValue = this.updatedAfterInputEl?.value;
+    debugLog("=== DATE INPUT EVENT FIRED ===");
+    debugLog("Date input value:", dateValue);
+    debugLog("Date input element:", this.updatedAfterInputEl);
 
-    // Show installed only toggle
-    const toggleContainer = controlsRow.createDiv("toggle-container");
-    this.toggleInstalledEl = toggleContainer.createEl("label", {
-      cls: "toggle-label",
-    });
-    const checkbox = this.toggleInstalledEl.createEl("input", {
-      type: "checkbox",
-      cls: "toggle-checkbox",
-    });
-    // Use registerDomEvent for automatic cleanup
-    this.registerDomEvent(checkbox, "change", async () => {
-      this.searchFilters.showInstalledOnly = checkbox.checked;
-      await this.filterPlugins();
-    });
-    this.toggleInstalledEl.createSpan({ text: "Show installed only" });
-
-    // Updated after filter
-    const updatedAfterContainer = controlsRow.createDiv(
-      "updated-after-container",
-    );
-    const updatedAfterLabel = updatedAfterContainer.createEl("label", {
-      cls: "updated-after-label",
-      text: "Updated after:",
-    });
-    this.updatedAfterInputEl = updatedAfterContainer.createEl("input", {
-      type: "date",
-      cls: "updated-after-input",
-      attr: { id: "updated-after-input" },
-    });
-    updatedAfterLabel.setAttribute("for", "updated-after-input");
-
-    // Handler function for date changes
-    const handleDateChange = async () => {
-      const dateValue = this.updatedAfterInputEl?.value;
-      debugLog("=== DATE INPUT EVENT FIRED ===");
-      debugLog("Date input value:", dateValue);
-      debugLog("Date input element:", this.updatedAfterInputEl);
-
-      if (dateValue) {
-        // Parse date input value (YYYY-MM-DD format) and create Date at midnight UTC
-        const dateParts = dateValue.split("-");
-        if (dateParts.length === 3) {
-          const [year, month, day] = dateParts.map(Number);
-          // Validate date components are valid numbers
+    if (dateValue) {
+      // Parse date input value (YYYY-MM-DD format) and create Date at midnight UTC
+      const dateParts = dateValue.split("-");
+      if (dateParts.length === 3) {
+        const [year, month, day] = dateParts.map(Number);
+        // Validate date components are valid numbers
+        if (
+          !isNaN(year) &&
+          !isNaN(month) &&
+          !isNaN(day) &&
+          year > 0 &&
+          month >= 1 &&
+          month <= 12 &&
+          day >= 1 &&
+          day <= 31
+        ) {
+          // Create date and validate it's actually valid (handles month/day mismatches)
+          const date = new Date(Date.UTC(year, month - 1, day));
+          // Check if date is valid and matches input (catches invalid dates like Feb 31)
           if (
-            !isNaN(year) &&
-            !isNaN(month) &&
-            !isNaN(day) &&
-            year > 0 &&
-            month >= 1 &&
-            month <= 12 &&
-            day >= 1 &&
-            day <= 31
+            !isNaN(date.getTime()) &&
+            date.getUTCFullYear() === year &&
+            date.getUTCMonth() === month - 1 &&
+            date.getUTCDate() === day
           ) {
-            // Create date and validate it's actually valid (handles month/day mismatches)
-            const date = new Date(Date.UTC(year, month - 1, day));
-            // Check if date is valid and matches input (catches invalid dates like Feb 31)
-            if (
-              !isNaN(date.getTime()) &&
-              date.getUTCFullYear() === year &&
-              date.getUTCMonth() === month - 1 &&
-              date.getUTCDate() === day
-            ) {
-              this.searchFilters.updatedAfter = date;
-              debugLog("Date filter set to:", date.toISOString());
-            } else {
-              console.warn("Invalid date:", dateValue);
-              this.searchFilters.updatedAfter = undefined;
-              this.isFilteringByDate = false;
-            }
+            this.searchFilters.updatedAfter = date;
+            debugLog("Date filter set to:", date.toISOString());
           } else {
-            console.warn("Invalid date format:", dateValue);
+            console.warn("Invalid date:", dateValue);
             this.searchFilters.updatedAfter = undefined;
             this.isFilteringByDate = false;
           }
@@ -346,13 +326,66 @@ export class PluginListView extends ItemView {
           this.isFilteringByDate = false;
         }
       } else {
-        debugLog("Date input cleared, removing filter");
+        console.warn("Invalid date format:", dateValue);
         this.searchFilters.updatedAfter = undefined;
         this.isFilteringByDate = false;
       }
-      // Let filterPlugins() handle setting isFilteringByDate appropriately
+    } else {
+      debugLog("Date input cleared, removing filter");
+      this.searchFilters.updatedAfter = undefined;
+      this.isFilteringByDate = false;
+    }
+    // Let filterPlugins() handle setting isFilteringByDate appropriately
+    await this.filterPlugins();
+  }
+
+  /**
+   * Create filter controls (installed toggle and date filter)
+   * Sets up event listeners for filter changes and accessibility attributes
+   * @param controlsRow The controls row element to add filters to
+   * @returns void
+   */
+  private createFilters(controlsRow: HTMLElement): void {
+    // Show installed only toggle
+    const toggleContainer = controlsRow.createDiv("toggle-container");
+    this.toggleInstalledEl = toggleContainer.createEl("label", {
+      cls: "toggle-label",
+    });
+    const checkbox = this.toggleInstalledEl.createEl("input", {
+      type: "checkbox",
+      cls: "toggle-checkbox",
+      attr: {
+        id: "show-installed-only-checkbox",
+        "aria-label": "Show installed plugins only",
+      },
+    });
+    // Use registerDomEvent for automatic cleanup
+    this.registerDomEvent(checkbox, "change", async () => {
+      this.searchFilters.showInstalledOnly = checkbox.checked;
       await this.filterPlugins();
-    };
+    });
+    const labelText = this.toggleInstalledEl.createSpan({
+      text: "Show installed only",
+    });
+    labelText.setAttribute("for", "show-installed-only-checkbox");
+
+    // Updated after filter
+    const updatedAfterContainer = controlsRow.createDiv(
+      "updated-after-container",
+    );
+    updatedAfterContainer.createEl("label", {
+      cls: "updated-after-label",
+      text: "Updated after:",
+      attr: { for: "updated-after-input" },
+    });
+    this.updatedAfterInputEl = updatedAfterContainer.createEl("input", {
+      type: "date",
+      cls: "updated-after-input",
+      attr: {
+        id: "updated-after-input",
+        "aria-label": "Filter plugins updated after this date",
+      },
+    });
 
     // Add both change and input event listeners
     // 'change' fires when the input loses focus after value changes (most reliable for date inputs)
@@ -360,7 +393,10 @@ export class PluginListView extends ItemView {
     // Use a shorter debounce for date changes to make it more responsive
     const dateDebounceDelay = 100; // Shorter delay for date changes
     // Track debounced handlers for manual cleanup
-    const debouncedDateHandler = debounce(handleDateChange, dateDebounceDelay);
+    const debouncedDateHandler = debounce(
+      () => this.handleDateFilterChange(),
+      dateDebounceDelay,
+    );
     this.updatedAfterInputEl.addEventListener("change", debouncedDateHandler);
     this.updatedAfterInputEl.addEventListener("input", debouncedDateHandler);
     this.trackedListeners.push(
@@ -377,16 +413,36 @@ export class PluginListView extends ItemView {
     );
 
     debugLog("Date input element created and listeners attached");
+  }
 
-    // Display mode toggle
+  /**
+   * Create display mode toggle (grid/list)
+   * Sets up buttons and event handlers for switching display modes
+   * Includes ARIA attributes for accessibility (role="group", aria-pressed)
+   * @param controlsRow The controls row element to add the toggle to
+   * @returns void
+   */
+  private createDisplayModeToggle(controlsRow: HTMLElement): void {
     this.modeToggleEl = controlsRow.createDiv("mode-toggle");
+    this.modeToggleEl.setAttribute("role", "group");
+    this.modeToggleEl.setAttribute("aria-label", "Display mode");
     const gridBtn = this.modeToggleEl.createEl("button", {
       cls: "mode-btn",
       text: "Grid",
+      attr: {
+        "aria-label": "Grid view",
+        "aria-pressed": this.displayMode === "grid" ? "true" : "false",
+        type: "button",
+      },
     });
     const listBtn = this.modeToggleEl.createEl("button", {
       cls: "mode-btn",
       text: "List",
+      attr: {
+        "aria-label": "List view",
+        "aria-pressed": this.displayMode === "list" ? "true" : "false",
+        type: "button",
+      },
     });
 
     // Set initial active state
@@ -400,25 +456,41 @@ export class PluginListView extends ItemView {
       await this.setDisplayMode("grid");
       gridBtn.addClass("active");
       listBtn.removeClass("active");
+      gridBtn.setAttribute("aria-pressed", "true");
+      listBtn.setAttribute("aria-pressed", "false");
     };
     const listHandler = async () => {
       await this.setDisplayMode("list");
       gridBtn.removeClass("active");
       listBtn.addClass("active");
+      gridBtn.setAttribute("aria-pressed", "false");
+      listBtn.setAttribute("aria-pressed", "true");
     };
 
     // Use registerDomEvent for automatic cleanup
     this.registerDomEvent(gridBtn, "click", gridHandler);
     this.registerDomEvent(listBtn, "click", listHandler);
+  }
 
-    // Sort dropdown
+  /**
+   * Create sort controls (dropdown and direction toggle)
+   * Sets up sort option selection and direction toggle with accessibility attributes
+   * @param controlsRow The controls row element to add sort controls to
+   * @returns void
+   */
+  private createSortControls(controlsRow: HTMLElement): void {
     const sortContainer = controlsRow.createDiv("sort-container");
-    const _sortLabel = sortContainer.createEl("label", {
+    sortContainer.createEl("label", {
       cls: "sort-label",
       text: "Sort by:",
+      attr: { for: "sort-select" },
     });
     const sortSelect = sortContainer.createEl("select", {
       cls: "sort-select",
+      attr: {
+        id: "sort-select",
+        "aria-label": "Sort plugins by",
+      },
     });
     sortSelect.createEl("option", { value: "name", text: "Name" });
     sortSelect.createEl("option", { value: "author", text: "Author" });
@@ -448,9 +520,38 @@ export class PluginListView extends ItemView {
       );
       await this.filterPlugins();
     });
+  }
+
+  /**
+   * Create the header with search bar and controls
+   * Sets up search input, filters, display mode toggle, and refresh button.
+   * Initializes event listeners for search (debounced), filters, sorting, and display mode.
+   * @param container The container element to add the header to
+   * @returns void
+   */
+  private createHeader(container: HTMLElement): void {
+    const header = container.createDiv("plugin-browser-header");
+
+    // Create search bar with refresh button
+    this.createSearchBar(header);
+
+    // Controls row
+    const controlsRow = header.createDiv("controls-row");
+
+    // Create filters (installed toggle and date filter)
+    this.createFilters(controlsRow);
+
+    // Create display mode toggle
+    this.createDisplayModeToggle(controlsRow);
+
+    // Create sort controls
+    this.createSortControls(controlsRow);
 
     // Plugin count (will be updated after plugins load)
     const countEl = controlsRow.createDiv("plugin-count");
+    countEl.setAttribute("role", "status");
+    countEl.setAttribute("aria-live", "polite");
+    countEl.setAttribute("aria-atomic", "true");
     countEl.setText("Loading plugins...");
     this.updatePluginCount(countEl);
   }
@@ -659,14 +760,21 @@ export class PluginListView extends ItemView {
 
     // If cache is empty, start checking in background but don't wait
     // This prevents blocking the UI - user will see plugins appear as status is checked
-    if (this.installedStatusCache.size === 0) {
+    // Use flag to prevent concurrent status checks (race condition fix)
+    if (
+      this.installedStatusCache.size === 0 &&
+      !this.isCheckingInstalledStatus
+    ) {
+      this.isCheckingInstalledStatus = true;
       // Start checking in background
       this.checkInstalledStatus()
         .then(() => {
+          this.isCheckingInstalledStatus = false;
           // Re-filter and re-render when status check completes
           this.filterPlugins();
         })
         .catch((error) => {
+          this.isCheckingInstalledStatus = false;
           console.warn("Failed to check installed status for filter:", error);
         });
       // Return empty array initially - plugins will appear as status is checked
@@ -678,6 +786,62 @@ export class PluginListView extends ItemView {
       const isInstalled = this.installedStatusCache.get(plugin.id) ?? false;
       return isInstalled;
     });
+  }
+
+  /**
+   * Process plugins in batches for date filtering
+   * Iterates through plugins in batches, checking abort signal and processing each batch
+   * @param plugins Array of plugins to filter
+   * @param updatedAfterNormalized The normalized date to compare against
+   * @param signal AbortSignal to cancel the operation if needed
+   * @returns Filtered array of plugins matching the date filter
+   */
+  private async processDateFilterBatches(
+    plugins: CommunityPlugin[],
+    updatedAfterNormalized: Date,
+    signal: AbortSignal,
+  ): Promise<CommunityPlugin[]> {
+    const filteredWithDates: CommunityPlugin[] = [];
+    // Process plugins in batches to avoid rate limiting while improving performance
+    // GitHub API allows 60 requests/hour for unauthenticated requests
+    // Using batch size of 10 with small delay between batches provides good balance
+    // These values balance performance with rate limit compliance
+    const BATCH_SIZE = PLUGIN_CONFIG.constants.batchSize;
+    const BATCH_DELAY_MS = PLUGIN_CONFIG.constants.batchDelay;
+
+    for (let i = 0; i < plugins.length; i += BATCH_SIZE) {
+      // Check if operation was aborted
+      if (signal.aborted) {
+        return [];
+      }
+
+      const batch = plugins.slice(i, i + BATCH_SIZE);
+
+      // Process batch in parallel for better performance
+      const batchResults = await this.processDateFilterBatch(
+        batch,
+        updatedAfterNormalized,
+      );
+
+      // Check again after async operation
+      if (signal.aborted) {
+        return [];
+      }
+
+      // Add valid results to filtered list
+      for (const result of batchResults) {
+        if (result) {
+          filteredWithDates.push(result);
+        }
+      }
+
+      // Add delay between batches to avoid rate limiting (except for last batch)
+      if (i + BATCH_SIZE < plugins.length) {
+        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+      }
+    }
+
+    return filteredWithDates;
   }
 
   /**
@@ -709,52 +873,15 @@ export class PluginListView extends ItemView {
       updatedAfterNormalized.toISOString(),
     );
     debugLog("Total plugins to filter:", plugins.length);
-    const filteredWithDates: CommunityPlugin[] = [];
     this.isFilteringByDate = true;
     this.updateLoadingState();
 
     try {
-      // Process plugins in batches to avoid rate limiting while improving performance
-      // GitHub API allows 60 requests/hour for unauthenticated requests
-      // Using batch size of 10 with small delay between batches provides good balance
-      // These values balance performance with rate limit compliance
-      const BATCH_SIZE = PLUGIN_CONFIG.constants.batchSize;
-      const BATCH_DELAY_MS = PLUGIN_CONFIG.constants.batchDelay;
-
-      for (let i = 0; i < plugins.length; i += BATCH_SIZE) {
-        // Check if operation was aborted
-        if (signal.aborted) {
-          this.isFilteringByDate = false;
-          return [];
-        }
-
-        const batch = plugins.slice(i, i + BATCH_SIZE);
-
-        // Process batch in parallel for better performance
-        const batchResults = await this.processDateFilterBatch(
-          batch,
-          updatedAfterNormalized,
-        );
-
-        // Check again after async operation
-        if (signal.aborted) {
-          this.isFilteringByDate = false;
-          this.updateLoadingState();
-          return [];
-        }
-
-        // Add valid results to filtered list
-        for (const result of batchResults) {
-          if (result) {
-            filteredWithDates.push(result);
-          }
-        }
-
-        // Add delay between batches to avoid rate limiting (except for last batch)
-        if (i + BATCH_SIZE < plugins.length) {
-          await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
-        }
-      }
+      const filteredWithDates = await this.processDateFilterBatches(
+        plugins,
+        updatedAfterNormalized,
+        signal,
+      );
 
       debugLog(
         "Date filter complete. Filtered plugins:",
@@ -815,6 +942,50 @@ export class PluginListView extends ItemView {
   }
 
   /**
+   * Cancel any pending filter operations
+   * Creates a new AbortController for the current filter operation
+   * @returns AbortSignal for the new filter operation
+   */
+  private cancelPendingFilters(): AbortSignal {
+    if (this.filterAbortController) {
+      this.filterAbortController.abort();
+    }
+    this.filterAbortController = new AbortController();
+    return this.filterAbortController.signal;
+  }
+
+  /**
+   * Update the display with filtered plugins
+   * Sorts plugins, renders them, and updates the plugin count
+   * @param filtered Array of filtered plugins to display
+   * @returns void
+   */
+  private updateDisplay(filtered: CommunityPlugin[]): void {
+    // Sort plugins before displaying
+    this.filteredPlugins = this.sortPlugins(filtered);
+    // Reset pagination when filters change (renderPlugins will handle this)
+    this.renderPlugins(true); // Reset pagination
+    this.updatePluginCount();
+    debugLog(
+      "Filter complete. Displaying",
+      this.filteredPlugins.length,
+      "plugins",
+    );
+  }
+
+  /**
+   * Reset filtering state when operation is aborted
+   * Ensures UI state is consistent after abort
+   * @returns void
+   */
+  private resetFilterState(): void {
+    debugLog("Filter operation was aborted");
+    // Ensure state is reset even if aborted
+    this.isFilteringByDate = false;
+    this.updateLoadingState();
+  }
+
+  /**
    * Filter plugins based on search query and filters
    * Prevents race conditions by aborting previous filter operations.
    * Applies search query, installed filter, and date filter sequentially.
@@ -829,11 +1000,7 @@ export class PluginListView extends ItemView {
     debugLog("Total plugins:", this.plugins.length);
 
     // Cancel any pending filter operation
-    if (this.filterAbortController) {
-      this.filterAbortController.abort();
-    }
-    this.filterAbortController = new AbortController();
-    const signal = this.filterAbortController.signal;
+    const signal = this.cancelPendingFilters();
 
     // Ensure isFilteringByDate is reset if we don't have a date filter
     // This prevents stuck state when date filter is cleared or plugins are empty
@@ -842,30 +1009,18 @@ export class PluginListView extends ItemView {
     }
 
     // Apply filters sequentially
-    let filtered = this.applySearchFilter([...this.plugins]);
-    debugLog("After search filter:", filtered.length);
-    filtered = await this.applyInstalledFilter(filtered);
-    debugLog("After installed filter:", filtered.length);
-    filtered = await this.applyDateFilter(filtered, signal);
-    debugLog("After date filter:", filtered.length);
+    const searchFiltered = this.applySearchFilter([...this.plugins]);
+    debugLog("After search filter:", searchFiltered.length);
+    const installedFiltered = await this.applyInstalledFilter(searchFiltered);
+    debugLog("After installed filter:", installedFiltered.length);
+    const dateFiltered = await this.applyDateFilter(installedFiltered, signal);
+    debugLog("After date filter:", dateFiltered.length);
 
     // Only update if not aborted
     if (!signal.aborted) {
-      // Sort plugins before displaying
-      this.filteredPlugins = this.sortPlugins(filtered);
-      // Reset pagination when filters change (renderPlugins will handle this)
-      this.renderPlugins(true); // Reset pagination
-      this.updatePluginCount();
-      debugLog(
-        "Filter complete. Displaying",
-        this.filteredPlugins.length,
-        "plugins",
-      );
+      this.updateDisplay(dateFiltered);
     } else {
-      debugLog("Filter operation was aborted");
-      // Ensure state is reset even if aborted
-      this.isFilteringByDate = false;
-      this.updateLoadingState();
+      this.resetFilterState();
     }
   }
 
@@ -978,6 +1133,8 @@ export class PluginListView extends ItemView {
         loadingIndicator.setText(
           this.isFilteringByDate ? "Filtering by date..." : "Refreshing...",
         );
+        loadingIndicator.setAttribute("role", "status");
+        loadingIndicator.setAttribute("aria-live", "polite");
       }
       return;
     }
@@ -986,16 +1143,18 @@ export class PluginListView extends ItemView {
     this.pluginsContainerEl.empty();
 
     if (this.isLoading) {
-      this.pluginsContainerEl
-        .createDiv("loading-message")
-        .setText("Loading plugins...");
+      const loadingMsg = this.pluginsContainerEl.createDiv("loading-message");
+      loadingMsg.setText("Loading plugins...");
+      loadingMsg.setAttribute("role", "status");
+      loadingMsg.setAttribute("aria-live", "polite");
       return;
     }
 
     if (this.isFilteringByDate) {
-      this.pluginsContainerEl
-        .createDiv("loading-message")
-        .setText("Filtering by date...");
+      const filteringMsg = this.pluginsContainerEl.createDiv("loading-message");
+      filteringMsg.setText("Filtering by date...");
+      filteringMsg.setAttribute("role", "status");
+      filteringMsg.setAttribute("aria-live", "polite");
       return;
     }
 
@@ -1013,7 +1172,10 @@ export class PluginListView extends ItemView {
       message =
         "No plugins found updated after the selected date. Try adjusting your filters.";
     }
-    this.pluginsContainerEl.createDiv("empty-message").setText(message);
+    const emptyMsg = this.pluginsContainerEl.createDiv("empty-message");
+    emptyMsg.setText(message);
+    emptyMsg.setAttribute("role", "status");
+    emptyMsg.setAttribute("aria-live", "polite");
     // Reset pagination on empty state
     this.visiblePluginsCount = 0;
     return;
@@ -1191,6 +1353,8 @@ export class PluginListView extends ItemView {
       "pagination-loading-indicator",
     );
     this.loadingIndicatorEl.setText("Loading more plugins...");
+    this.loadingIndicatorEl.setAttribute("role", "status");
+    this.loadingIndicatorEl.setAttribute("aria-live", "polite");
   }
 
   /**
@@ -1207,6 +1371,7 @@ export class PluginListView extends ItemView {
   /**
    * Create a plugin card element
    * Creates a clickable card displaying plugin information (name, author, description)
+   * Includes keyboard navigation support (Enter/Space to activate) and ARIA labels for accessibility
    * @param plugin The plugin to create a card for
    * @returns void
    */
@@ -1216,16 +1381,35 @@ export class PluginListView extends ItemView {
     const card = this.pluginsContainerEl.createDiv("plugin-card");
     // Store plugin ID as data attribute for later badge updates
     card.setAttribute("data-plugin-id", plugin.id);
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute(
+      "aria-label",
+      `Plugin: ${plugin.name} by ${plugin.author}. ${plugin.description}`,
+    );
     // Use registerDomEvent for automatic cleanup (card is recreated on each render, but this ensures cleanup)
     this.registerDomEvent(card, "click", () => {
       this.openPluginDetail(plugin);
     });
+    // Add keyboard support (Enter and Space keys)
+    this.registerDomEvent(card, "keydown", (evt: KeyboardEvent) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        this.openPluginDetail(plugin);
+      }
+    });
 
     // Plugin header
     const header = card.createDiv("plugin-card-header");
-    header.createEl("h3", { cls: "plugin-title", text: plugin.name });
+    const titleEl = header.createEl("h3", {
+      cls: "plugin-title",
+      text: plugin.name,
+    });
+    titleEl.setAttribute("id", `plugin-title-${plugin.id}`);
     const installedBadge = header.createDiv("installed-badge");
     installedBadge.setText("INSTALLED");
+    installedBadge.setAttribute("aria-label", "Installed");
+    installedBadge.setAttribute("role", "status");
     // Show badge if plugin is installed (check cache, fallback to false if not cached)
     const isInstalled = this.installedStatusCache.get(plugin.id) ?? false;
     if (!isInstalled) {
@@ -1234,7 +1418,11 @@ export class PluginListView extends ItemView {
 
     // Plugin meta
     const meta = card.createDiv("plugin-meta");
-    meta.createEl("div", { cls: "plugin-author", text: `By ${plugin.author}` });
+    const authorEl = meta.createEl("div", {
+      cls: "plugin-author",
+      text: `By ${plugin.author}`,
+    });
+    authorEl.setAttribute("aria-label", `Author: ${plugin.author}`);
 
     // Plugin description
     const description = card.createDiv("plugin-description");
@@ -1279,8 +1467,8 @@ export class PluginListView extends ItemView {
     }
 
     this.releaseInfoProcessing = true;
-    const BATCH_SIZE = 5; // Process 5 plugins at a time
-    const BATCH_DELAY = 2000; // 2 second delay between batches to avoid rate limits
+    const BATCH_SIZE = PLUGIN_CONFIG.constants.releaseInfoBatchSize;
+    const BATCH_DELAY = PLUGIN_CONFIG.constants.releaseInfoBatchDelay;
 
     while (this.releaseInfoQueue.length > 0) {
       // Take a batch from the queue

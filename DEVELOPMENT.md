@@ -1967,6 +1967,231 @@ if (file instanceof TFile) {
 }
 ```
 
+## Accessibility Best Practices
+
+### ARIA Labels and Roles
+
+Always provide ARIA labels for interactive elements that don't have visible text:
+
+```typescript
+// ✅ Good: Button with icon only
+const refreshBtn = container.createEl("button", {
+  cls: "refresh-button",
+  text: "↻",
+  attr: {
+    "aria-label": "Refresh plugin list",
+    type: "button",
+  },
+});
+
+// ✅ Good: Input with label association
+const label = container.createEl("label", {
+  text: "Search:",
+  attr: { for: "search-input" },
+});
+const input = container.createEl("input", {
+  type: "text",
+  attr: {
+    id: "search-input",
+    "aria-label": "Search plugins",
+    role: "searchbox",
+  },
+});
+
+// ✅ Good: Decorative icons
+const icon = container.createSpan("icon");
+icon.setAttribute("aria-hidden", "true"); // Hide from screen readers
+```
+
+### Keyboard Navigation
+
+Ensure all interactive elements are keyboard accessible:
+
+```typescript
+// ✅ Good: Card with keyboard support
+const card = container.createDiv("plugin-card");
+card.setAttribute("role", "button");
+card.setAttribute("tabindex", "0");
+card.setAttribute("aria-label", "Plugin: Example Plugin");
+
+this.registerDomEvent(card, "keydown", (evt: KeyboardEvent) => {
+  if (evt.key === "Enter" || evt.key === " ") {
+    evt.preventDefault();
+    this.openPlugin(card);
+  }
+});
+
+// ✅ Good: Escape key support
+this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
+  if (evt.key === "Escape") {
+    this.close();
+  }
+});
+```
+
+### Focus Management
+
+Manage focus appropriately for better keyboard navigation:
+
+```typescript
+// ✅ Good: Set initial focus
+async onOpen() {
+  this.createUI();
+  // Use setTimeout to ensure DOM is ready
+  setTimeout(() => {
+    this.searchInput?.focus();
+  }, 0);
+}
+
+// ✅ Good: Return focus after actions
+async handleAction() {
+  const previousFocus = document.activeElement;
+  await this.performAction();
+  // Return focus to previous element
+  if (previousFocus instanceof HTMLElement) {
+    previousFocus.focus();
+  }
+}
+```
+
+### Screen Reader Support
+
+Use live regions for dynamic content updates:
+
+```typescript
+// ✅ Good: Status updates with live regions
+const statusEl = container.createDiv("status");
+statusEl.setAttribute("role", "status");
+statusEl.setAttribute("aria-live", "polite"); // Non-intrusive updates
+statusEl.setAttribute("aria-atomic", "true"); // Read entire content
+statusEl.setText("Loading plugins...");
+
+// ✅ Good: Error messages with assertive live region
+const errorEl = container.createDiv("error-message");
+errorEl.setAttribute("role", "alert");
+errorEl.setAttribute("aria-live", "assertive"); // Interruptive updates
+errorEl.setText("Failed to load plugins");
+```
+
+### Semantic HTML
+
+Use proper semantic elements and roles:
+
+```typescript
+// ✅ Good: Proper heading hierarchy
+container.createEl("h1", { text: "Main Title" });
+container.createEl("h2", { text: "Section Title" });
+
+// ✅ Good: Regions and landmarks
+const mainContent = container.createDiv("main-content");
+mainContent.setAttribute("role", "main");
+mainContent.setAttribute("aria-label", "Plugin list");
+
+// ✅ Good: Button groups
+const buttonGroup = container.createDiv("button-group");
+buttonGroup.setAttribute("role", "group");
+buttonGroup.setAttribute("aria-label", "Display options");
+```
+
+### Focus Indicators
+
+Always provide visible focus indicators in CSS:
+
+```css
+/* ✅ Good: Visible focus indicators */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.plugin-card:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  border-color: var(--interactive-accent);
+}
+```
+
+### Toggle Buttons
+
+Use proper ARIA attributes for toggle buttons:
+
+```typescript
+// ✅ Good: Toggle button with aria-pressed
+const toggleBtn = container.createEl("button", {
+  text: "Grid",
+  attr: {
+    "aria-label": "Grid view",
+    "aria-pressed": isActive ? "true" : "false",
+    type: "button",
+  },
+});
+
+// Update aria-pressed when state changes
+toggleBtn.setAttribute("aria-pressed", "true");
+```
+
+### Links
+
+Provide context for external links:
+
+```typescript
+// ✅ Good: External link with context
+const link = container.createEl("a", {
+  href: "https://example.com",
+  text: "Learn more",
+  attr: {
+    target: "_blank",
+    rel: "noopener noreferrer",
+    "aria-label": "Learn more (opens in new tab)",
+  },
+});
+```
+
+### Form Controls
+
+Properly associate labels with form controls:
+
+```typescript
+// ✅ Good: Label association
+const label = container.createEl("label", {
+  text: "Filter by date:",
+  attr: { for: "date-input" },
+});
+const input = container.createEl("input", {
+  type: "date",
+  attr: {
+    id: "date-input",
+    "aria-label": "Filter plugins updated after this date",
+  },
+});
+```
+
+### Common Accessibility Patterns
+
+1. **All interactive elements should be keyboard accessible**
+   - Use `tabindex="0"` for custom interactive elements
+   - Handle Enter and Space keys for buttons/cards
+   - Handle Escape key for closing modals/views
+
+2. **Provide ARIA labels for all icons and icon-only buttons**
+   - Use `aria-label` for descriptive labels
+   - Use `aria-hidden="true"` for decorative icons
+
+3. **Use live regions for dynamic content**
+   - `aria-live="polite"` for status updates
+   - `aria-live="assertive"` for error messages
+   - `role="status"` or `role="alert"` as appropriate
+
+4. **Maintain proper heading hierarchy**
+   - Use h1, h2, h3 in order
+   - Don't skip heading levels
+
+5. **Ensure sufficient color contrast**
+   - Use Obsidian's CSS variables for theming
+   - Test with screen readers and keyboard navigation
+
 ## Additional Resources
 
 - [Obsidian Sample Plugin](https://github.com/obsidianmd/obsidian-sample-plugin) - Official template
@@ -1974,3 +2199,5 @@ if (file instanceof TFile) {
 - [Obsidian Plugin Developer Docs](https://marcusolsson.github.io/obsidian-plugin-docs/) - Community docs
 - [Obsidian Discord #plugin-dev](https://discord.com/channels/686053708261228577/840286264964022302) - Developer community
 - [Obsidian Plugin Submission Guidelines](https://docs.obsidian.md/Plugins/Releasing/Submit%20your%20plugin) - Submission requirements
+- [WCAG 2.1 Guidelines](https://www.w3.org/WAI/WCAG21/quickref/) - Web Content Accessibility Guidelines
+- [ARIA Authoring Practices Guide](https://www.w3.org/WAI/ARIA/apg/) - ARIA best practices

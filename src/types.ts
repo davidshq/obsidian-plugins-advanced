@@ -80,6 +80,7 @@ export interface PluginSettings {
     updatedAfter?: string; // ISO date string for serialization
   };
   paginationThreshold?: number; // Distance from bottom (in pixels) to trigger auto-loading (default: 200)
+  dataRefreshIntervalMinutes?: number; // How often to refresh plugin data (default: 30 minutes = 2x/hour)
 }
 
 /**
@@ -130,7 +131,6 @@ export interface PluginConfig {
   };
   constants: {
     cacheDuration: number;
-    releaseDateCacheDuration: number;
     errorCacheDuration: number;
     backgroundRefreshInterval: number;
     viewInitializationDelay: number;
@@ -139,6 +139,9 @@ export interface PluginConfig {
     debounceDelay: number;
     statusCheckBatchSize: number;
     pluginsPerPage: number;
+    releaseInfoBatchSize: number;
+    releaseInfoBatchDelay: number;
+    rateLimitErrorDebounceMs: number;
     retry: {
       maxRetries: number;
       initialDelay: number;

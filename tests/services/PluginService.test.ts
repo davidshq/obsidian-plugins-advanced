@@ -46,6 +46,7 @@ describe("PluginService", () => {
 
   beforeEach(() => {
     pluginService = new PluginService();
+    pluginService.clearCache(); // Ensure clean state
     vi.clearAllMocks();
     vi.useRealTimers();
   });
@@ -251,6 +252,69 @@ describe("PluginService", () => {
       const result = await pluginService.fetchCommunityPlugins();
       expect(result).toEqual(mockPlugins);
     });
+
+    it("should handle 304 response without cache gracefully", async () => {
+      // Clear any existing cache
+      pluginService.clearCache();
+
+      // Simulate 304 response when no cache exists
+      const response304 = {
+        status: 304,
+        headers: {},
+        json: mockPlugins, // Still return data for 304
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      };
+      vi.mocked(requestUrl).mockResolvedValueOnce(
+        response304 as Awaited<ReturnType<typeof requestUrl>>,
+      );
+
+      // Should fall through and parse the response
+      const result = await pluginService.fetchCommunityPlugins();
+      expect(result).toEqual(mockPlugins);
+    });
+
+    it("should handle rate limit errors and return cached data", async () => {
+      // First, populate cache
+      const firstResponse = {
+        status: 200,
+        headers: {},
+        json: mockPlugins,
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      };
+      vi.mocked(requestUrl).mockResolvedValueOnce(
+        firstResponse as Awaited<ReturnType<typeof requestUrl>>,
+      );
+
+      await pluginService.fetchCommunityPlugins();
+
+      // Expire cache
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(PLUGIN_CONFIG.constants.cacheDuration + 1000);
+      vi.useRealTimers();
+
+      vi.clearAllMocks();
+
+      // Simulate rate limit error (403 or 429)
+      const rateLimitResponse = {
+        status: 429,
+        headers: {
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(Date.now() / 1000) + 3600),
+        },
+        json: {},
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      };
+      vi.mocked(requestUrl).mockResolvedValueOnce(
+        rateLimitResponse as Awaited<ReturnType<typeof requestUrl>>,
+      );
+
+      const result = await pluginService.fetchCommunityPlugins();
+      // Should return cached data on rate limit
+      expect(result).toEqual(mockPlugins);
+    });
   });
 
   describe("searchPlugins", () => {
@@ -438,6 +502,15 @@ describe("PluginService", () => {
   describe("getLatestReleaseDate", () => {
     it("should fetch release date successfully", async () => {
       const releaseDate = "2024-01-15T12:00:00Z";
+      // Mock stats fetch to return null (no stats available) so it falls through to GitHub API
+      vi.mocked(requestUrl).mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        json: {}, // Empty stats
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      } as Awaited<ReturnType<typeof requestUrl>>);
+
       const mockResponse = {
         status: 200,
         headers: {},
@@ -455,6 +528,15 @@ describe("PluginService", () => {
 
     it("should use cache when data is fresh", async () => {
       const releaseDate = "2024-01-15T12:00:00Z";
+      // Mock stats fetch to return null (no stats available) so it falls through to GitHub API
+      vi.mocked(requestUrl).mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        json: {}, // Empty stats
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      } as Awaited<ReturnType<typeof requestUrl>>);
+
       const mockResponse = {
         status: 200,
         headers: {},
@@ -476,6 +558,15 @@ describe("PluginService", () => {
 
     it("should return null for 404 (no releases)", async () => {
       vi.resetAllMocks();
+      // Mock stats fetch to return null (no stats available) so it falls through to GitHub API
+      vi.mocked(requestUrl).mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        json: {}, // Empty stats
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      } as Awaited<ReturnType<typeof requestUrl>>);
+
       const error = new Error("404 Not Found");
       vi.mocked(requestUrl).mockRejectedValue(error);
 
@@ -484,6 +575,15 @@ describe("PluginService", () => {
     });
 
     it("should handle invalid repo format", async () => {
+      // Mock stats fetch to return null (no stats available) so it falls through to GitHub API
+      vi.mocked(requestUrl).mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        json: {}, // Empty stats
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      } as Awaited<ReturnType<typeof requestUrl>>);
+
       const invalidPlugin = { ...mockPlugins[0], repo: "invalid-repo-format" };
       const result = await pluginService.getLatestReleaseDate(invalidPlugin);
       expect(result).toBeNull();
@@ -492,6 +592,15 @@ describe("PluginService", () => {
     it("should handle ETag conditional requests", async () => {
       vi.resetAllMocks();
       const releaseDate = "2024-01-15T12:00:00Z";
+      // Mock stats fetch to return null (no stats available) so it falls through to GitHub API
+      vi.mocked(requestUrl).mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        json: {}, // Empty stats
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      } as Awaited<ReturnType<typeof requestUrl>>);
+
       const firstResponse = {
         status: 200,
         headers: { ETag: '"release123"' },
@@ -507,6 +616,15 @@ describe("PluginService", () => {
 
       // Clear cache to force a new request (but ETag should still be used)
       pluginService.clearCache();
+
+      // Mock stats fetch again for second call
+      vi.mocked(requestUrl).mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        json: {}, // Empty stats
+        text: "",
+        arrayBuffer: new ArrayBuffer(0),
+      } as Awaited<ReturnType<typeof requestUrl>>);
 
       const secondResponse = {
         status: 304,
@@ -524,7 +642,7 @@ describe("PluginService", () => {
       // Check that ETag was stored and used in conditional request
       // Note: clearCache clears ETags too, so this test verifies ETag storage
       // For a true conditional request test, we'd need to not clear cache
-      expect(requestUrl).toHaveBeenCalledTimes(2);
+      expect(requestUrl).toHaveBeenCalledTimes(4); // 2 stats calls + 2 API calls
     });
   });
 

@@ -23,17 +23,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `.cursorrules` for AI assistant rules
   - `.cursor/commands/review-code.md` for code review commands
 - `FUTURE.md` for tracking future development plans
+- **Architecture Decision Records (ADRs):**
+  - ADR-0001: Service layer architecture pattern
+  - ADR-0002: Caching strategy with ETags and conditional requests
+  - ADR-0003: View management pattern for Obsidian plugins
+  - ADR-0004: Testing strategy (unit tests with Vitest)
+  - ADR-0005: Accessibility implementation (ARIA, keyboard navigation)
+  - ADR-0006: Configuration management (centralized config)
+  - ADR-0007: Error handling and rate limiting strategies
+- **Documentation:**
+  - E2E testing guide for Electron apps (`docs/e2e-testing-electron-apps.md`)
+  - ADR documentation index (`docs/adr/README.md`)
+- **Accessibility improvements:**
+  - ARIA labels and roles throughout `PluginListView`
+  - Keyboard navigation support (Enter/Space keys for plugin cards)
+  - Semantic HTML improvements with proper label associations
+  - Screen reader announcements for loading states and status updates
+- **Configuration enhancements:**
+  - Configurable data refresh interval setting (default: 30 minutes)
+  - Dynamic cache duration based on refresh interval
+  - Improved rate limiting configuration constants
+  - Batch processing configuration for release info fetching
 
 ### Changed
 - **Major refactoring and enhancement of core services:**
   - `InstallationService.ts`: Significant improvements to plugin installation/uninstallation logic
-  - `PluginService.ts`: Enhanced plugin fetching, caching, and management capabilities
-  - `PluginListView.ts`: Major UI improvements and filtering enhancements
+  - `PluginService.ts`: 
+    - Refactored with extracted helper methods for better maintainability
+    - Improved error handling with dedicated methods for rate limits, 304 responses, and fetch errors
+    - Enhanced cache validation and request header preparation logic
+    - Added `setCacheDuration()` method for dynamic cache duration management
+    - Better separation of concerns with private helper methods
+  - `PluginListView.ts`: 
+    - Major refactoring with extracted methods for better code organization
+    - Split large methods into focused helper methods (`createHeader`, `createSearchBar`, `createFilters`, `createDisplayModeToggle`, `createSortControls`)
+    - Extracted date filter batch processing into dedicated method
+    - Improved filter cancellation and state management
+    - Better handling of concurrent status checks to prevent race conditions
   - `PluginDetailView.ts`: Enhanced plugin detail display and interaction
 - **Configuration and build improvements:**
   - Updated `esbuild.config.mjs` with improved build configuration
   - Enhanced `tsconfig.json` with better TypeScript compiler options
   - Updated `manifest.json` to version 0.2.0
+  - Added author information to `manifest.json` and `package.json`
+- **Main plugin improvements:**
+  - Background refresh interval is now configurable via settings
+  - Cache duration automatically adjusts based on refresh interval setting
+  - Improved refresh interval management with proper cleanup and restart on settings change
 - **Development workflow enhancements:**
   - Improved `scripts/install-dev.js` with better error handling and features
   - Enhanced `scripts/setup-dev.js` with additional setup options
@@ -46,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Migrated from `.eslintrc.json` to ESLint flat config format (`eslint.config.mjs`)
   - Updated `.gitignore` with additional ignore patterns
   - Enhanced code formatting and linting rules
+  - Improved code documentation with JSDoc comments
+  - Better method organization and separation of concerns
 
 ### Dependencies
 - Updated `package.json` with new development dependencies:
@@ -54,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated ESLint packages to version 9.x
   - Updated TypeScript and other build tools
 - Updated `package-lock.json` with all dependency changes
+
+### Fixed
+- Race condition in installed status checking when filter is applied with empty cache
+- Improved handling of 304 responses when no cache exists
+- Better error handling for rate limit scenarios with fallback to cached data
 
 ### Statistics
 - 38 files changed
