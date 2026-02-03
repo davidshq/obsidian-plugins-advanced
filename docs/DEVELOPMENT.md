@@ -2095,23 +2095,12 @@ buttonGroup.setAttribute("aria-label", "Display options");
 
 ### Focus Indicators
 
-Always provide visible focus indicators in CSS:
+Always provide visible focus indicators in CSS. See [CSS Styling Best Practices - Focus Indicators](../docs/css-styling-best-practices.md#focus-indicators) for CSS examples and best practices.
 
-```css
-/* ✅ Good: Visible focus indicators */
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
-}
-
-.plugin-card:focus-visible {
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
-  border-color: var(--interactive-accent);
-}
-```
+**Key points:**
+- Use `:focus-visible` pseudo-class for keyboard focus
+- Use `var(--interactive-accent)` for focus outline color
+- Ensure 2px outline with offset for visibility
 
 ### Toggle Buttons
 
@@ -2189,8 +2178,14 @@ const input = container.createEl("input", {
    - Don't skip heading levels
 
 5. **Ensure sufficient color contrast**
-   - Use Obsidian's CSS variables for theming
+   - Use Obsidian's CSS variables for theming (see [CSS Styling Best Practices](../docs/css-styling-best-practices.md#color-contrast))
    - Test with screen readers and keyboard navigation
+
+## CSS Styling Best Practices
+
+For comprehensive guidance on styling Obsidian plugins, see:
+- [CSS Styling Best Practices](../docs/css-styling-best-practices.md) - Complete guide to styling Obsidian plugins
+- [CSS Variables Reference](../docs/css-variables.md) - Reference for all Obsidian CSS variables
 
 ## Additional Resources
 
